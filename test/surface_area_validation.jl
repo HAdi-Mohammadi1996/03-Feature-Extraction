@@ -7,6 +7,40 @@ include(joinpath(@__DIR__, "geometries.jl"))
 include(joinpath(@__DIR__, "..", "src", "utils.jl"))
 include(joinpath(@__DIR__, "..", "src", "surface_area.jl"))
 
+const PHASE_COLORS = Dict(1 => :gray, 2 => :blue, 3 => :green)
+
+function voxel_plot(C, title::String)
+    p = nothing
+    for phase in (1, 2, 3)
+        idx = findall(==(phase), C)
+        isempty(idx) && continue
+        xs = [i.I[1] for i in idx]
+        ys = [i.I[2] for i in idx]
+        zs = [i.I[3] for i in idx]
+        kw = (
+            color = PHASE_COLORS[phase],
+            markershape = :square,
+            markersize = 2,
+            markerstrokecolor = :black,
+            markerstrokewidth = 0.2,
+            label = "",
+        )
+        if p === nothing
+            p = scatter(xs, ys, zs;
+                kw...,
+                title = title,
+                xlim = (0, NX), ylim = (0, NY), zlim = (0, NZ),
+                aspect_ratio = 1,
+                camera = (45, 30),
+                legend = false,
+            )
+        else
+            scatter!(p, xs, ys, zs; kw...)
+        end
+    end
+    return p === nothing ? plot(title=title, legend=false) : p
+end
+
 println("=" ^ 80)
 println("Surface Area Validation - Comparison with TauFactor Reference Values")
 println("=" ^ 80)
@@ -23,20 +57,11 @@ for name in SHAPE_NAMES
     computed_areas[name] = surface_area(C, 1; voxel_size=1.0, sigma=1.0)
 end
 
-# Display middle slices
-println("\nMiddle Slice Visualizations (z = $(NZ ÷ 2)):")
+# 3D voxel view — all shapes in one figure (like TauFactor notebook)
+println("\n3D voxel visualizations:")
 println("-" ^ 80)
-mid = NZ ÷ 2
-for name in SHAPE_NAMES
-    C = GEOMETRIES[name]()
-    p = heatmap(C[:, :, mid]', 
-                title=string(name), 
-                clims=(0, 3), 
-                axis=false, 
-                size=(300, 300),
-                color=:viridis)
-    display(p)
-end
+plots = [voxel_plot(GEOMETRIES[name](), string(name)) for name in SHAPE_NAMES]
+display(plot(plots..., layout=(1, 5), size=(1600, 400), plot_title="Surface area test shapes"))
 
 # Validation table
 println("\nValidation Results:")
