@@ -16,14 +16,6 @@ function axis_value(I, dir)
     return dir == 1 ? I[1] : dir == 2 ? I[2] : I[3]
 end
 
-function feature_row(sample, phase, vf, chord, area, gt, pt, perc, tpb, active_tpb)
-    return (sample=sample, phase=phase, volume_fraction=vf,
-        mean_chord_length_um=chord, surface_area_um2=area,
-        geometric_tortuosity=gt, physical_tortuosity=pt,
-        percolation_fraction=perc, total_tpb_density_um_inv2=tpb,
-        active_tpb_density_um_inv2=active_tpb)
-end
-
 function mean_skip_inf(values)
     kept = [v for v in values if isfinite(v)]
     return isempty(kept) ? Inf : mean(kept)
@@ -31,7 +23,7 @@ end
 
 csv_value(::Missing) = ""
 csv_value(x::AbstractString) = x
-csv_value(x::Real) = isfinite(x) ? string(x) : "Inf"
+csv_value(x::Real) = isnan(x) ? "NaN" : isinf(x) ? "Inf" : string(x)
 
 function minheap_push!(heap, item)
     push!(heap, item)

@@ -7,10 +7,11 @@ function load_microstructure(path::AbstractString; key="C")
 end
 
 function write_features_csv(path::AbstractString, rows)
-    headers = (:sample, :phase, :volume_fraction, :mean_chord_length_um,
-        :surface_area_um2, :geometric_tortuosity, :physical_tortuosity,
-        :percolation_fraction, :total_tpb_density_um_inv2,
-        :active_tpb_density_um_inv2)
+    isempty(rows) && error("Cannot write an empty feature table")
+    headers = propertynames(first(rows))
+    all(propertynames(row) == headers for row in rows) ||
+        error("All feature rows must have the same columns")
+
     open(path, "w") do io
         println(io, join(string.(headers), ","))
         for row in rows
