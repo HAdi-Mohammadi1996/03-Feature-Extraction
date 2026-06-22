@@ -15,8 +15,10 @@ include(joinpath(@__DIR__, "src", "tortuosity_physical_matrixfree.jl"))
 include(joinpath(@__DIR__, "src", "tpb.jl"))
 include(joinpath(@__DIR__, "src", "feature_extraction.jl"))
 
-const INPUT_DIR = length(ARGS) >= 1 ? abspath(ARGS[1]) : joinpath(@__DIR__, "inputs")
-const OUTPUT_DIR = length(ARGS) >= 2 ? abspath(ARGS[2]) : joinpath(@__DIR__, "output")
+SampleID = 69
+
+const INPUT_DIR = length(ARGS) >= 1 ? abspath(ARGS[1]) : joinpath(@__DIR__, "D:\\Hadi\\SharedData\\PhaseFieldResults\\$SampleID\\mat_volume_preserving")
+const OUTPUT_DIR = length(ARGS) >= 2 ? abspath(ARGS[2]) : joinpath(@__DIR__, "D:\\Hadi\\SharedData\\PhaseFieldResults\\$SampleID\\features_new")
 const REQUESTED_WORKERS = length(ARGS) >= 3 ? parse(Int, ARGS[3]) :
     parse(Int, get(ENV, "FEATURE_WORKERS", "1"))
 const MAT_KEY = "C"
@@ -87,7 +89,7 @@ else
 end
 
 mkpath(OUTPUT_DIR)
-output_path = joinpath(OUTPUT_DIR, "all_features.csv")
+output_path = joinpath(OUTPUT_DIR, "$(SampleID)_all_features.csv")
 write_features_csv(output_path, all_rows)
 
 println("Finished.")
