@@ -1,27 +1,61 @@
 # Microstructure Feature Extraction
 
-This repository contains Julia scripts for extracting morphological and
-transport features from 3D labelled microstructures stored in MAT files.
-It uses plain scripts rather than a Julia package.
+Julia scripts for extracting morphological and transport features from 3D
+labelled microstructures stored in MAT files.
+
+## Run-button workflow
+
+No PowerShell arguments are required.
+
+1. Open `main.jl` for one MAT file or `main_batch.jl` for a time series.
+2. Edit the settings at the top of that file.
+3. Press **Run**.
+
+If the current Julia session has too few threads, the script automatically
+restarts itself with `JULIA_COMPUTE_THREADS` and continues the calculation.
+
+## Static phase reuse
+
+The batch configuration contains:
+
+```julia
+recalculate_static_phase_each_timestep=false,
+static_phase=2,
+verify_static_phase=true,
+```
+
+- `true` preserves the original behavior and recalculates every phase for every
+  MAT file.
+- `false` calculates the selected `static_phase` from the first MAT file in
+  sorted filename order, then reuses its phase-specific properties at all later
+  timesteps.
+- `static_phase=2` is the default for YSZ.
+- `verify_static_phase=true` checks every later volume against the reference
+  phase mask and stops with a clear error if that phase changed.
+
+The reused phase-specific columns are volume fraction, chord length, surface
+area, geometric tortuosity, physical tortuosity, and percolating fraction.
+`tpb` and `atpb` are always recalculated because they depend on the changing
+relationship among phases.
+
+For filenames such as `t000000.mat`, `t000001.mat`, and so on, `t000000.mat`
+is the reference because it is the first sorted file.
 
 ## Input
 
-Place MAT files in the `inputs` directory. Each file must contain a 3D array
-named `C` by default. Values greater than zero are treated as material phases;
-zero is treated as background.
+Each MAT file must contain a 3D labelled array named `C` by default. Positive
+integers are material phases; zero is background. Integer storage types are
+preserved, so an `Int32` MAT volume stays `Int32` in memory.
 
-## Settings
-
-The calculation settings are defined near the top of `main.jl` and
-`main_batch.jl`:
+## Main feature settings
 
 ```julia
-FeatureConfig(
+config = FeatureConfig(
     voxel_size=0.1,
     Nrays=5000,
     min_chord=4.0,
     phases=[1, 2, 3],
-    use_all_directions=true,
+    use_all_directions=false,
     direction=1,
     surface_sigma=1.0,
     D0=1.0,
@@ -30,134 +64,101 @@ FeatureConfig(
     physical_maxiter=10_000,
     physical_threaded=true,
     physical_thread_threshold=50_000,
+    physical_max_threads=6,
+    recalculate_static_phase_each_timestep=false,
+    static_phase=2,
+    verify_static_phase=true,
     rng_seed=1,
 )
 ```
 
-With `use_all_directions=true`, directional results are averaged over the
-three axes. Set it to `false` to use only `direction`.
+With `use_all_directions=true`, directional properties are averaged over all
+three axes. Otherwise only `direction` is evaluated.
 
-Physical tortuosity uses non-periodic, zero-flux transverse boundaries and
-Dirichlet inlet/outlet boundaries. `physical_boundary_factor=2.0` represents
-the half-cell distance between a boundary voxel centre and the boundary face.
-The physical tortuosity solver is matrix-free PCG. Start Julia with threads,
-for example `julia --threads=8 main.jl`, to use threaded stencil and vector
-updates for large systems.
+## Thread settings for this workstation
 
-## Run One Sample
+`main_batch.jl` is configured for the detected AMD Threadripper PRO 7995WX
+workstation:
 
-The default input is `inputs/2.mat`:
-
-```powershell
-julia main.jl
+```julia
+JULIA_COMPUTE_THREADS = 48
+PARALLEL_SAMPLE_WORKERS = 8
+PHYSICAL_THREADS_PER_SOLVE = 6
 ```
 
-An input file and output directory can also be supplied:
+Real-data benchmarks on a 256³ sample showed:
 
-```powershell
-julia main.jl inputs/3.mat output
-```
+| Arrangement | Throughput |
+| --- | ---: |
+| 1 solve × 48 tasks | about 1.38 solves/minute |
+| 3 concurrent solves × 16 tasks | about 3.06 solves/minute |
+| 6 concurrent solves × 8 tasks | about 3.35 solves/minute |
+| 8 concurrent solves × 6 tasks | about 3.40 solves/minute |
+| 12 concurrent solves × 8 tasks on 96 Julia threads | about 3.43 solves/minute |
 
-The result is written to `output/<sample>_features.csv`.
+The 96-thread option provided almost no throughput gain and made a single solve
+much slower because of this Windows machine's processor-group/NUMA behavior.
+The 48-thread setting is therefore the safer default.
 
-## Run All Samples
-
-Process every `.mat` file in `inputs` and combine the results:
-
-```powershell
-julia main_batch.jl
-```
-
-Optional input and output directories:
-
-```powershell
-julia main_batch.jl inputs output
-```
-
-The combined result is written to `output/all_features.csv`.
-
-### Parallel Samples
-
-Samples can be processed concurrently using Julia threads. For two samples at
-a time:
-
-```powershell
-julia --threads=2 main_batch.jl inputs output 2
-```
-
-The third argument is the number of concurrent samples. The default is `1`
-because physical tortuosity can use a large amount of memory. Increasing the
-worker count helps only when samples are independent and enough RAM is
-available for several physical-tortuosity solves at once.
+BLAS is restricted to one thread because the matrix-free PCG solver already
+uses Julia threads and does not benefit from nested BLAS threading.
 
 ## Output
 
-Each sample is stored in one row. Columns are grouped by property:
-`vf1,vf2,vf3`, then `cld1,cld2,cld3`, and so on.
+Each sample is one row. Output replacement is atomic, so an interrupted run
+does not leave a partly overwritten final CSV.
 
-| Column name | Meaning | Unit |
+| Column | Meaning | Unit |
 | --- | --- | --- |
 | `vf1`, `vf2`, `vf3` | phase volume fraction | dimensionless |
-| `cld1`, `cld2`, `cld3` | mean chord length | same length unit as `voxel_size` |
-| `sa1`, `sa2`, `sa3` | specific surface area | inverse of the `voxel_size` length unit |
+| `cld1`, `cld2`, `cld3` | mean chord length | `voxel_size` length unit |
+| `sa1`, `sa2`, `sa3` | specific surface area | inverse length |
 | `gt1`, `gt2`, `gt3` | geometric tortuosity | dimensionless |
 | `pt1`, `pt2`, `pt3` | physical tortuosity | dimensionless |
-| `perc1`, `perc2`, `perc3` | percolating fraction of each phase | dimensionless |
-| `tpb` | total TPB density | inverse square of the `voxel_size` length unit |
-| `atpb` | active TPB density | inverse square of the `voxel_size` length unit |
+| `perc1`, `perc2`, `perc3` | percolating phase fraction | dimensionless |
+| `tpb` | total TPB density | inverse length squared |
+| `atpb` | active TPB density | inverse length squared |
 
-For example, when `voxel_size` is in micrometres, chord length is in
-micrometres, specific surface area is in `1/micrometre`, and TPB density is in
-`1/micrometre^2`.
+## Performance changes
 
-TPB calculations use phase labels `1`, `2`, and `3`. Active TPB additionally
-requires phases `1` and `2` to percolate in the evaluated direction.
+- Static-phase properties and percolation masks can be reused.
+- Percolation is calculated once per phase/direction and shared by geometric
+  tortuosity, physical tortuosity, and active TPB.
+- Boundary searches now seed only the relevant 2D face rather than scanning
+  the entire 3D volume.
+- Linear-index neighbour traversal avoids repeated Cartesian-index conversion.
+- The matrix-free PCG solver uses composable dynamic Julia tasks, allowing
+  several samples and several solver tasks to share one thread pool.
+- MAT integer types are preserved to reduce memory use.
 
-Geometric tortuosity is the mean shortest-path length from every percolating
-inlet voxel to the outlet, divided by the straight sample thickness. Paths use
-6-neighbour face connectivity.
-
-## Performance Note
-
-Physical tortuosity solves a diffusion system for every requested phase and
-direction. The main calculation uses a matrix-free Jacobi-preconditioned
-conjugate-gradient solver, avoiding sparse matrix assembly and factorization.
-Large volumes such as `256 x 256 x 256` can still require substantial runtime,
-especially with `use_all_directions=true`.
-
-For batch runs, avoid oversubscribing the CPU. For large samples, prefer one
-sample worker and give the matrix-free solver several Julia threads:
-
-```powershell
-julia --threads=8 main_batch.jl inputs output 1
-```
-
-When `main_batch.jl` is run with more than one sample worker, the physical
-tortuosity solve is kept serial inside each worker to avoid nested threading.
+Base Julia threading was retained. `Polyester.jl` is aimed at lower-overhead
+thread loops, but the measured workload is dominated by long memory-bound
+stencil passes and nested sample/solver scheduling. `LoopVectorization.jl`
+targets vectorizable rectangular loops, whereas the main stencil has irregular
+neighbour indices and convergence reductions. Neither package offered enough
+benefit here to justify an additional dependency or numerical-risk surface.
 
 ## Dependencies
 
-The scripts require Julia and these external packages:
+The main scripts require:
 
 ```julia
-import Pkg
-Pkg.add(["MAT", "ImageFiltering", "Plots"])
+MAT
+ImageFiltering
 ```
 
-`Plots` is only required by the validation scripts.
+The validation figure scripts also use `Plots`.
 
 ## Validation
 
-Validation scripts are in `test`:
+Every file in `test` is a directly runnable Julia script. The suite covers:
 
-```powershell
-julia test/chord_length_validation.jl
-julia test/surface_area_validation.jl
-julia test/geometric_tortuosity_validation.jl
-julia test/percolation_validation.jl
-julia test/physical_tau_validation.jl
-julia test/physical_tau_matrixfree_validation.jl
-julia test/tpb_validation.jl
-```
+- chord length,
+- surface area,
+- percolation,
+- geometric tortuosity,
+- sparse and matrix-free physical tortuosity,
+- TPB,
+- full-vs-cached static-phase consistency.
 
-Generated validation figures are saved in `test/figures`.
+The cache consistency test is `test/feature_cache_validation.jl`.

@@ -4,6 +4,7 @@ using Statistics
 using Test
 using Plots
 
+include(joinpath(@__DIR__, "..", "src", "utils.jl"))
 include(joinpath(@__DIR__, "..", "src", "chord_length.jl"))
 
 const BG = 0

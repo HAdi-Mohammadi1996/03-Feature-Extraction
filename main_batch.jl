@@ -1,96 +1,63 @@
-using MAT
-using Random
-using ImageFiltering
-using Statistics
-using SparseArrays
-using LinearAlgebra
+# =============================================================================
+# EDIT SETTINGS HERE, THEN PRESS RUN
+# =============================================================================
 
-include(joinpath(@__DIR__, "src", "io.jl"))
-include(joinpath(@__DIR__, "src", "volume_fraction.jl"))
-include(joinpath(@__DIR__, "src", "chord_length.jl"))
-include(joinpath(@__DIR__, "src", "surface_area.jl"))
-include(joinpath(@__DIR__, "src", "percolation.jl"))
-include(joinpath(@__DIR__, "src", "tortuosity_geometric.jl"))
-include(joinpath(@__DIR__, "src", "tortuosity_physical_matrixfree.jl"))
-include(joinpath(@__DIR__, "src", "tpb.jl"))
-include(joinpath(@__DIR__, "src", "feature_extraction.jl"))
+SAMPLE_ID = "69"
 
-SampleID = 69
+INPUT_DIR = raw"D:\Hadi\SharedData\PhaseFieldResults\69\mat_volume_preserving"
+OUTPUT_DIR = raw"D:\Hadi\SharedData\PhaseFieldResults\69\features_new"
+OUTPUT_FILE = "69_all_features.csv"
+MAT_KEY = "C"
 
-const INPUT_DIR = length(ARGS) >= 1 ? abspath(ARGS[1]) : joinpath(@__DIR__, "D:\\Hadi\\SharedData\\PhaseFieldResults\\$SampleID\\mat_volume_preserving")
-const OUTPUT_DIR = length(ARGS) >= 2 ? abspath(ARGS[2]) : joinpath(@__DIR__, "D:\\Hadi\\SharedData\\PhaseFieldResults\\$SampleID\\features_new")
-const REQUESTED_WORKERS = length(ARGS) >= 3 ? parse(Int, ARGS[3]) :
-    parse(Int, get(ENV, "FEATURE_WORKERS", "1"))
-const MAT_KEY = "C"
+# Tuned starting point for this 96-core / 192-thread workstation.
+JULIA_COMPUTE_THREADS = 48
+PARALLEL_SAMPLE_WORKERS = 8
+PHYSICAL_THREADS_PER_SOLVE = 6
 
-const CONFIG = FeatureConfig(
-    voxel_size=0.1,
-    Nrays=5000,
-    min_chord=4.0,
-    phases=[1, 2, 3],
-    use_all_directions=false,
-    direction=1,
-    surface_sigma=1.0,
-    D0=1.0,
-    physical_boundary_factor=2.0,
-    physical_rtol=1e-8,
-    physical_maxiter=10_000,
-    physical_threaded=REQUESTED_WORKERS == 1,
-    physical_thread_threshold=50_000,
-    rng_seed=1,
-)
+include(joinpath(@__DIR__, "src", "runtime.jl"))
 
-isdir(INPUT_DIR) || error("Input directory does not exist: $INPUT_DIR")
+if ensure_compute_threads(@__FILE__, JULIA_COMPUTE_THREADS)
+    include(joinpath(@__DIR__, "src", "load_feature_extraction.jl"))
+    BLAS.set_num_threads(1)
 
-mat_files = sort(filter(
-    path -> endswith(lowercase(path), ".mat"),
-    readdir(INPUT_DIR; join=true),
-))
-isempty(mat_files) && error("No .mat files found in: $INPUT_DIR")
-REQUESTED_WORKERS > 0 || error("The worker count must be positive")
-REQUESTED_WORKERS <= Threads.nthreads() ||
-    error("Requested $REQUESTED_WORKERS workers, but Julia has $(Threads.nthreads()) threads. " *
-          "Start Julia with --threads=$REQUESTED_WORKERS.")
+    config = FeatureConfig(
+        voxel_size=0.1,
+        Nrays=5000,
+        min_chord=4.0,
+        phases=[1, 2, 3],
+        use_all_directions=false,
+        direction=1,
+        surface_sigma=1.0,
+        D0=1.0,
+        physical_boundary_factor=2.0,
+        physical_rtol=1e-8,
+        physical_maxiter=10_000,
+        physical_threaded=true,
+        physical_thread_threshold=50_000,
+        physical_max_threads=PHYSICAL_THREADS_PER_SOLVE,
 
-worker_count = min(REQUESTED_WORKERS, length(mat_files))
-all_rows = Vector{NamedTuple}(undef, length(mat_files))
-println("Found $(length(mat_files)) MAT file(s).")
-println("Parallel sample workers: $worker_count")
+        # true  = recalculate every phase at every timestep (original behavior)
+        # false = calculate STATIC_PHASE only for the first sorted MAT file,
+        #         then reuse its phase-specific features for later timesteps
+        recalculate_static_phase_each_timestep=false,
+        static_phase=2,
+        verify_static_phase=true,
+        rng_seed=1,
+    )
 
-function process_sample(index, input_path)
-    sample = splitext(basename(input_path))[1]
-    println("[$index/$(length(mat_files))] Processing: ", basename(input_path))
+    output_path = joinpath(OUTPUT_DIR, OUTPUT_FILE)
+    println("Input directory: ", INPUT_DIR)
+    println("Output file: ", output_path)
+    println("Julia compute threads: ", Threads.nthreads(:default))
 
-    C = load_microstructure(input_path; key=MAT_KEY)
-    return extract_features(C; sample=sample, config=CONFIG)
+    run_batch(
+        INPUT_DIR;
+        output_path=output_path,
+        mat_key=MAT_KEY,
+        config=config,
+        sample_workers=PARALLEL_SAMPLE_WORKERS,
+    )
+
+    println("Finished.")
+    println("Combined results saved to: ", output_path)
 end
-
-if worker_count == 1
-    for (index, input_path) in enumerate(mat_files)
-        all_rows[index] = process_sample(index, input_path)
-    end
-else
-    jobs = Channel{Int}(length(mat_files))
-    for index in eachindex(mat_files)
-        put!(jobs, index)
-    end
-    close(jobs)
-
-    tasks = [
-        Threads.@spawn begin
-            for index in jobs
-                all_rows[index] = process_sample(index, mat_files[index])
-                GC.gc()
-            end
-        end
-        for _ in 1:worker_count
-    ]
-    foreach(fetch, tasks)
-end
-
-mkpath(OUTPUT_DIR)
-output_path = joinpath(OUTPUT_DIR, "$(SampleID)_all_features.csv")
-write_features_csv(output_path, all_rows)
-
-println("Finished.")
-println("Combined results saved to: ", output_path)

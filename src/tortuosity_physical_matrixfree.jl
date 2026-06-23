@@ -11,8 +11,10 @@ struct PhysicalTauThreadPlan
     sums2::Vector{Float64}
 end
 
-function PhysicalTauThreadPlan(n::Int, threaded::Bool, threshold::Int)
-    ntasks = threaded && n >= threshold ? min(Threads.nthreads(), n) : 1
+function PhysicalTauThreadPlan(n::Int, threaded::Bool, threshold::Int, max_tasks::Int)
+    available = Threads.nthreads(:default)
+    requested = max_tasks == 0 ? available : min(max_tasks, available)
+    ntasks = threaded && n >= threshold ? min(requested, n) : 1
     return PhysicalTauThreadPlan(ntasks, cld(n, ntasks), zeros(ntasks), zeros(ntasks))
 end
 
@@ -80,7 +82,7 @@ function operator_and_dot!(
         return total
     end
 
-    Threads.@threads :static for task in 1:plan.ntasks
+    Threads.@threads :dynamic for task in 1:plan.ntasks
         subtotal = 0.0
         @inbounds for row in task_range(plan, task, n)
             value = operator_row_value(neighbors, diagonal, x, row)
@@ -115,7 +117,7 @@ function initialize_residual!(
         return residual_norm2, rhs_norm2
     end
 
-    Threads.@threads :static for task in 1:plan.ntasks
+    Threads.@threads :dynamic for task in 1:plan.ntasks
         residual_sum = 0.0
         rhs_sum = 0.0
         @inbounds for row in task_range(plan, task, n)
@@ -150,7 +152,7 @@ function initialize_direction!(
         return rz
     end
 
-    Threads.@threads :static for task in 1:plan.ntasks
+    Threads.@threads :dynamic for task in 1:plan.ntasks
         subtotal = 0.0
         @inbounds for i in task_range(plan, task, n)
             zi = residual[i] * inv_diagonal[i]
@@ -184,7 +186,7 @@ function update_solution_residual!(
         return residual_norm2
     end
 
-    Threads.@threads :static for task in 1:plan.ntasks
+    Threads.@threads :dynamic for task in 1:plan.ntasks
         subtotal = 0.0
         @inbounds for i in task_range(plan, task, n)
             x[i] += alpha * direction[i]
@@ -215,7 +217,7 @@ function precondition_and_dot!(
         return rz
     end
 
-    Threads.@threads :static for task in 1:plan.ntasks
+    Threads.@threads :dynamic for task in 1:plan.ntasks
         subtotal = 0.0
         @inbounds for i in task_range(plan, task, n)
             zi = residual[i] * inv_diagonal[i]
@@ -242,7 +244,7 @@ function update_direction!(
         return direction
     end
 
-    Threads.@threads :static for task in 1:plan.ntasks
+    Threads.@threads :dynamic for task in 1:plan.ntasks
         @inbounds for i in task_range(plan, task, n)
             direction[i] = z[i] + beta * direction[i]
         end
@@ -363,13 +365,14 @@ function jacobi_pcg!(
     maxiter::Int,
     threaded::Bool,
     thread_threshold::Int,
+    max_threads::Int,
 )
     n = length(rhs)
     residual = similar(rhs)
     z = similar(rhs)
     direction = similar(rhs)
     product = similar(rhs)
-    plan = PhysicalTauThreadPlan(n, threaded, thread_threshold)
+    plan = PhysicalTauThreadPlan(n, threaded, thread_threshold, max_threads)
 
     residual_norm2, rhs_norm2 = initialize_residual!(residual, operator, x, rhs, plan)
     rhs_norm = sqrt(rhs_norm2)
@@ -422,7 +425,8 @@ six-neighbor stencil.
 
 Set `threaded=true` and start Julia with `--threads=N` to parallelize the PCG
 stencil and vector-update loops. Small systems below `thread_threshold` run
-serially to avoid thread overhead.
+serially to avoid thread overhead. Set `max_threads` to limit the number of
+compute tasks used by one solve; `0` uses all available Julia compute threads.
 
 Set `return_info=true` to return the tortuosity, convergence flag, iteration
 count, and final relative residual.
@@ -439,6 +443,9 @@ function physical_tortuosity_matrixfree(
     maxiter::Int=10_000,
     threaded::Bool=true,
     thread_threshold::Int=50_000,
+    max_threads::Int=0,
+    percolation::Union{Nothing,PercolationResult}=nothing,
+    phase_fraction::Union{Nothing,Real}=nothing,
     return_info::Bool=false,
 )
     dir in (1, 2, 3) || error("dir must be 1, 2, or 3")
@@ -450,22 +457,27 @@ function physical_tortuosity_matrixfree(
     atol >= 0 || error("atol must be non-negative")
     maxiter > 0 || error("maxiter must be positive")
     thread_threshold > 0 || error("thread_threshold must be positive")
+    max_threads >= 0 || error("max_threads must be non-negative")
 
     dims = size(C)
-    eps_phase = count(==(phase), C) / length(C)
+    eps_phase = phase_fraction === nothing ?
+        count(==(phase), C) / length(C) :
+        Float64(phase_fraction)
     if eps_phase == 0
         info = (tau=Inf, converged=true, iterations=0, relative_residual=0.0)
         return return_info ? info : info.tau
     end
 
-    percolation = percolation_result(C .== phase, dir)
-    if percolation.fraction == 0.0
+    phase_percolation = percolation === nothing ?
+        percolation_result(C .== phase, dir) :
+        percolation
+    if phase_percolation.fraction == 0.0
         info = (tau=Inf, converged=true, iterations=0, relative_residual=0.0)
         return return_info ? info : info.tau
     end
 
     operator, rhs, concentration, outlet_rows = physical_tau_system(
-        percolation.mask,
+        phase_percolation.mask,
         dir,
         boundary_conductance_factor,
     )
@@ -478,6 +490,7 @@ function physical_tortuosity_matrixfree(
         maxiter=maxiter,
         threaded=threaded,
         thread_threshold=thread_threshold,
+        max_threads=max_threads,
     )
     converged || error(
         "Matrix-free physical tortuosity did not converge in $maxiter iterations " *

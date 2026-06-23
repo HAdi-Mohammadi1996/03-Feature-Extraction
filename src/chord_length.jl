@@ -1,4 +1,3 @@
-include("utils.jl")
 function random_direction(rng)
     z = 2rand(rng) - 1
     theta = 2pi * rand(rng)

@@ -42,10 +42,24 @@ function total_tpb_density(C::AbstractArray{<:Integer,3}; voxel_size=0.1)
     return count_tpb_edges(C) * voxel_size / volume
 end
 
-function active_tpb_density(C::AbstractArray{<:Integer,3}, dir::Int; voxel_size=0.1)
+function active_tpb_density(
+    C::AbstractArray{<:Integer,3},
+    dir::Int;
+    voxel_size=0.1,
+    phase_percolation=nothing,
+)
     voxel_size > 0 || error("voxel_size must be positive")
-    active12 = Dict(1 => percolation_result(C .== 1, dir).mask,
-        2 => percolation_result(C .== 2, dir).mask)
+    active12 = if phase_percolation === nothing
+        Dict(
+            1 => percolation_result(C .== 1, dir).mask,
+            2 => percolation_result(C .== 2, dir).mask,
+        )
+    else
+        Dict(
+            1 => phase_percolation[(1, dir)].mask,
+            2 => phase_percolation[(2, dir)].mask,
+        )
+    end
     volume = length(C) * voxel_size^3
     return count_tpb_edges(C; active12=active12) * voxel_size / volume
 end
