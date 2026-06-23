@@ -124,6 +124,69 @@ function validate_phase_cache(C, sample, config, cache)
     end
 end
 
+function assemble_feature_row(
+    sample,
+    phases;
+    vf,
+    chords,
+    specific_surface,
+    gt,
+    pt,
+    perc,
+    tpb_total,
+    tpb_active,
+)
+    names = Symbol[:sample]
+    values = Any[string(sample)]
+    feature_groups = (
+        ("vf", vf),
+        ("cld", chords),
+        ("sa", specific_surface),
+        ("gt", gt),
+        ("pt", pt),
+        ("perc", perc),
+    )
+    for (prefix, feature) in feature_groups, phase in phases
+        push!(names, Symbol(prefix, phase))
+        push!(values, feature[phase])
+    end
+    append!(names, (:tpb, :atpb))
+    append!(values, (tpb_total, tpb_active))
+    return NamedTuple{Tuple(names)}(Tuple(values))
+end
+
+function make_phase_feature_cache(
+    C,
+    sample,
+    config,
+    masks,
+    percolations;
+    vf,
+    chords,
+    specific_surface,
+    gt,
+    pt,
+    perc,
+)
+    phase = config.static_phase
+    phase_percolation = Dict(
+        dir => percolations[(phase, dir)]
+        for dir in directions(config)
+    )
+    return PhaseFeatureCache(
+        phase,
+        string(sample),
+        copy(phase_mask!(masks, C, phase)),
+        vf[phase],
+        chords[phase],
+        specific_surface[phase],
+        gt[phase],
+        pt[phase],
+        perc[phase],
+        phase_percolation,
+    )
+end
+
 function _extract_features(
     C::AbstractArray{<:Integer,3};
     sample="sample",
@@ -231,21 +294,6 @@ function _extract_features(
         perc[phase] = phase_cache.perc
     end
 
-    names = Symbol[:sample]
-    values = Any[string(sample)]
-    feature_groups = (
-        ("vf", vf),
-        ("cld", chords),
-        ("sa", specific_surface),
-        ("gt", gt),
-        ("pt", pt),
-        ("perc", perc),
-    )
-    for (prefix, feature) in feature_groups, phase in phases
-        push!(names, Symbol(prefix, phase))
-        push!(values, feature[phase])
-    end
-
     tpb_total = total_tpb_density(C; voxel_size=config.voxel_size)
     tpb_active = mean([
         active_tpb_density(
@@ -256,10 +304,18 @@ function _extract_features(
         )
         for dir in dirs
     ])
-    append!(names, (:tpb, :atpb))
-    append!(values, (tpb_total, tpb_active))
-
-    row = NamedTuple{Tuple(names)}(Tuple(values))
+    row = assemble_feature_row(
+        sample,
+        phases;
+        vf=vf,
+        chords=chords,
+        specific_surface=specific_surface,
+        gt=gt,
+        pt=pt,
+        perc=perc,
+        tpb_total=tpb_total,
+        tpb_active=tpb_active,
+    )
     context = (
         masks=masks,
         vf=vf,
@@ -300,22 +356,18 @@ function extract_features_with_phase_cache(
         config=config,
         physical_max_threads=physical_max_threads,
     )
-    phase = config.static_phase
-    phase_percolation = Dict(
-        dir => context.percolations[(phase, dir)]
-        for dir in directions(config)
-    )
-    cache = PhaseFeatureCache(
-        phase,
-        string(sample),
-        copy(phase_mask!(context.masks, C, phase)),
-        context.vf[phase],
-        context.chords[phase],
-        context.specific_surface[phase],
-        context.gt[phase],
-        context.pt[phase],
-        context.perc[phase],
-        phase_percolation,
+    cache = make_phase_feature_cache(
+        C,
+        sample,
+        config,
+        context.masks,
+        context.percolations;
+        vf=context.vf,
+        chords=context.chords,
+        specific_surface=context.specific_surface,
+        gt=context.gt,
+        pt=context.pt,
+        perc=context.perc,
     )
     return row, cache
 end

@@ -7,12 +7,61 @@ labelled microstructures stored in MAT files.
 
 No PowerShell arguments are required.
 
-1. Open `main.jl` for one MAT file or `main_batch.jl` for a time series.
+1. Open `main.jl` for one MAT file, `main_batch.jl` for a CPU time series, or
+   `main_batch_gpu.jl` for the accelerated hybrid time series.
 2. Edit the settings at the top of that file.
 3. Press **Run**.
 
 If the current Julia session has too few threads, the script automatically
 restarts itself with `JULIA_COMPUTE_THREADS` and continues the calculation.
+
+## Hybrid CPU + NVIDIA GPU workflow
+
+Use `main_batch_gpu.jl` for the accelerated time-series pipeline. As with the
+CPU scripts, edit the settings at the top and press **Run**; no terminal
+arguments are needed.
+
+For every timestep, the hybrid pipeline:
+
+1. loads and prefetches MAT files on the CPU,
+2. calculates shared phase masks and percolation once,
+3. starts the physical-tortuosity solves on the NVIDIA GPU,
+4. simultaneously calculates chord length, surface area, geometric
+   tortuosity, percolation and TPB properties on the CPU,
+5. combines the CPU and GPU results in the original column order, and
+6. writes the final CSV atomically.
+
+The static-phase settings work identically to `main_batch.jl`. With phase 2
+static, its complete feature set, including physical tortuosity, is calculated
+only from the first sorted MAT file and reused later. TPB and active TPB remain
+time-dependent.
+
+The real 256-cubed validation sample produced identical non-physical values and
+a maximum CPU/GPU relative physical-tortuosity difference of
+`6.5e-15`. Measured times were:
+
+| Run | CPU-only | Hybrid CPU/GPU |
+| --- | ---: | ---: |
+| first timestep, all three phases | 144.5 s | 20.0 s |
+| later timestep, phases 1 and 3 | approximately 38.6 s effective CPU batch time | 13.0 s |
+
+The later-timestep comparison accounts for the existing eight-worker CPU batch
+throughput rather than comparing only single-sample latency. A fresh Julia
+process also performs a one-time CUDA compilation and warm-up before the first
+file; this cost is negligible across the complete 161-file batch.
+
+`main_batch.jl` remains available as the CPU fallback. The GPU script requires
+an NVIDIA CUDA-capable GPU and the Julia package `CUDA`:
+
+```julia
+import Pkg
+Pkg.add("CUDA")
+```
+
+Set `MAX_FILES` near the top of `main_batch_gpu.jl` to a small integer for a
+short trial, or leave it as `nothing` to process every MAT file. Trial runs
+automatically use an output name such as `23_first2.csv`, so they do not
+overwrite the complete output.
 
 ## Static phase reuse
 
@@ -147,7 +196,8 @@ MAT
 ImageFiltering
 ```
 
-The validation figure scripts also use `Plots`.
+The hybrid GPU script additionally requires `CUDA`. The validation figure
+scripts also use `Plots`.
 
 ## Validation
 
@@ -159,6 +209,8 @@ Every file in `test` is a directly runnable Julia script. The suite covers:
 - geometric tortuosity,
 - sparse and matrix-free physical tortuosity,
 - TPB,
-- full-vs-cached static-phase consistency.
+- full-vs-cached static-phase consistency,
+- complete CPU-vs-hybrid-GPU feature consistency.
 
 The cache consistency test is `test/feature_cache_validation.jl`.
+The hybrid consistency test is `test/hybrid_feature_validation.jl`.
