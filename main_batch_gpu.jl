@@ -3,10 +3,10 @@
 # EDIT SETTINGS HERE, THEN PRESS RUN
 # =============================================================================
 
-SAMPLE_ID = 52
+SAMPLE_ID = 380
 
-INPUT_DIR = joinpath("D:\\Hadi\\SharedData\\PhaseFieldResults", "$SAMPLE_ID", "mat")
-OUTPUT_DIR = joinpath("D:\\Hadi\\SharedData\\PhaseFieldResults", "$SAMPLE_ID", "features")
+INPUT_DIR = joinpath("C:\\Users\\r43341mm\\OneDrive - The University of Manchester\\Research\\SharedData\\PhaseFieldResults", "$SAMPLE_ID", "mat")
+OUTPUT_DIR = joinpath("C:\\Users\\r43341mm\\OneDrive - The University of Manchester\\Research\\SharedData\\PhaseFieldResults", "$SAMPLE_ID", "features")
 OUTPUT_FILE = "$SAMPLE_ID.csv"
 MAT_KEY = "C"
 
