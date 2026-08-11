@@ -1,65 +1,43 @@
-function block_phase(C, I, active12)
-    v = C[I...]
-    if active12 !== nothing && (v == 1 || v == 2) && !active12[v][I...]
-        return 0
-    end
-    return v
+@inline function is_tpb(a, b, c, d, phases)
+    return all(p -> a == p || b == p || c == p || d == p, phases)
 end
 
-is_tpb_edge(vals) = all(phase -> phase in vals, (1, 2, 3))
+function total_tpb_density(C; spacing=(1.0, 1.0, 1.0))
+    ndims(C) == 3  || error("The volume must be 3D")
+    phases = unique(C)
+    length(phases) == 3 || error("The volume must have excatly 3 phases")
 
-function count_tpb_edges(C::AbstractArray{<:Integer,3}; active12=nothing)
-    nx, ny, nz = size(C)
-    count_edges = 0
+    Nx, Ny, Nz = size(C)
+    tpb_x = tpb_y = tpb_z = 0
 
-    for x in 1:nx, y in 1:ny-1, z in 1:nz-1
-        vals = (block_phase(C, (x, y, z), active12),
-            block_phase(C, (x, y + 1, z), active12),
-            block_phase(C, (x, y, z + 1), active12),
-            block_phase(C, (x, y + 1, z + 1), active12))
-        count_edges += is_tpb_edge(vals) ? 1 : 0
+    for i in 1:Nx, j in 1:(Ny-1), k in 1:(Nz-1)
+        a = C[i, j, k]
+        b = C[i, j+1, k]
+        c = C[i, j, k+1]
+        d = C[i, j+1, k+1]
+
+        tpb_x += is_tpb(a, b, c, d, phases)
     end
-    for y in 1:ny, x in 1:nx-1, z in 1:nz-1
-        vals = (block_phase(C, (x, y, z), active12),
-            block_phase(C, (x + 1, y, z), active12),
-            block_phase(C, (x, y, z + 1), active12),
-            block_phase(C, (x + 1, y, z + 1), active12))
-        count_edges += is_tpb_edge(vals) ? 1 : 0
+
+    for i in 1:(Nx-1), j in 1:Ny, k in 1:(Nz-1)
+        a = C[i, j, k]
+        b = C[i+1, j, k]
+        c = C[i, j, k+1]
+        d = C[i+1, j, k+1]
+
+        tpb_y += is_tpb(a, b, c, d, phases)
     end
-    for z in 1:nz, x in 1:nx-1, y in 1:ny-1
-        vals = (block_phase(C, (x, y, z), active12),
-            block_phase(C, (x + 1, y, z), active12),
-            block_phase(C, (x, y + 1, z), active12),
-            block_phase(C, (x + 1, y + 1, z), active12))
-        count_edges += is_tpb_edge(vals) ? 1 : 0
+
+    for i in 1:(Nx-1), j in 1:(Ny-1), k in 1:Nz
+        a = C[i, j, k]
+        b = C[i+1, j, k]
+        c = C[i, j+1, k]
+        d = C[i+1, j+1, k]
+
+        tpb_z += is_tpb(a, b, c, d, phases)
     end
-    return count_edges
+
+    return (tpb_x * spacing[1] + tpb_y * spacing[2] + tpb_z * spacing[3]) / (length(C) * prod(spacing))
+
 end
 
-function total_tpb_density(C::AbstractArray{<:Integer,3}; voxel_size=0.1)
-    voxel_size > 0 || error("voxel_size must be positive")
-    volume = length(C) * voxel_size^3
-    return count_tpb_edges(C) * voxel_size / volume
-end
-
-function active_tpb_density(
-    C::AbstractArray{<:Integer,3},
-    dir::Int;
-    voxel_size=0.1,
-    phase_percolation=nothing,
-)
-    voxel_size > 0 || error("voxel_size must be positive")
-    active12 = if phase_percolation === nothing
-        Dict(
-            1 => percolation_result(C .== 1, dir).mask,
-            2 => percolation_result(C .== 2, dir).mask,
-        )
-    else
-        Dict(
-            1 => phase_percolation[(1, dir)].mask,
-            2 => phase_percolation[(2, dir)].mask,
-        )
-    end
-    volume = length(C) * voxel_size^3
-    return count_tpb_edges(C; active12=active12) * voxel_size / volume
-end

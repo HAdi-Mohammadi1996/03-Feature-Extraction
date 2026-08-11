@@ -1,33 +1,17 @@
-function load_microstructure(path::AbstractString; key="C")
-    data = matread(path)
-    haskey(data, key) || error("MAT file does not contain key '$key'")
-    C = data[key]
-    ndims(C) == 3 || error("Expected '$key' to be a 3D array")
-
-    if eltype(C) <: Integer
-        return Array(C)
-    end
-
-    all(isinteger, C) || error("Expected '$key' to contain integer phase labels")
-    return round.(Int, C)
+using MAT
+function load_microstructure(path; key="C")
+    C = matread(path)[key]
+    ndims(C) ∈ (2, 3) || error("'$key' must be a 2D or 3D array")
+    all(isinteger, C) || error("'$key' must contain integer phase labels")
+    return Int8.(C)
 end
 
-function write_features_csv(path::AbstractString, rows)
-    isempty(rows) && error("Cannot write an empty feature table")
+function write_features_csv(path, rows)
     headers = propertynames(first(rows))
-    all(propertynames(row) == headers for row in rows) ||
-        error("All feature rows must have the same columns")
-
-    output_dir = dirname(abspath(path))
-    mkpath(output_dir)
-    temporary_path = tempname(output_dir)
-
-    open(temporary_path, "w") do io
-        println(io, join(string.(headers), ","))
+    open(path, "w") do f
+        println(f, join(headers, ","))
         for row in rows
-            println(io, join((csv_value(getproperty(row, h)) for h in headers), ","))
+            println(f, join(row, ","))
         end
     end
-    mv(temporary_path, path; force=true)
-    return path
 end
