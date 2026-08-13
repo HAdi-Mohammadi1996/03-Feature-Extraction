@@ -10,31 +10,37 @@ function total_tpb_density(C; spacing=(1.0, 1.0, 1.0))
     Nx, Ny, Nz = size(C)
     tpb_x = tpb_y = tpb_z = 0
 
-    for i in 1:Nx, j in 1:(Ny-1), k in 1:(Nz-1)
-        a = C[i, j, k]
-        b = C[i, j+1, k]
-        c = C[i, j, k+1]
-        d = C[i, j+1, k+1]
+    for k in 1:(Nz-1), j in 1:(Ny-1)
+        @inbounds @simd for i in 1:Nx
+            a = C[i, j, k]
+            b = C[i, j+1, k]
+            c = C[i, j, k+1]
+            d = C[i, j+1, k+1]
 
-        tpb_x += is_tpb(a, b, c, d, phases)
+            tpb_x += is_tpb(a, b, c, d, phases)
+        end
     end
 
-    for i in 1:(Nx-1), j in 1:Ny, k in 1:(Nz-1)
-        a = C[i, j, k]
-        b = C[i+1, j, k]
-        c = C[i, j, k+1]
-        d = C[i+1, j, k+1]
+    for k in 1:(Nz-1), j in 1:Ny
+        @inbounds @simd for i in 1:(Nx-1)
+            a = C[i, j, k]
+            b = C[i+1, j, k]
+            c = C[i, j, k+1]
+            d = C[i+1, j, k+1]
 
-        tpb_y += is_tpb(a, b, c, d, phases)
+            tpb_y += is_tpb(a, b, c, d, phases)
+        end
     end
 
-    for i in 1:(Nx-1), j in 1:(Ny-1), k in 1:Nz
-        a = C[i, j, k]
-        b = C[i+1, j, k]
-        c = C[i, j+1, k]
-        d = C[i+1, j+1, k]
+    for k in 1:Nz, j in 1:(Ny-1)
+        @inbounds @simd for i in 1:(Nx-1)
+            a = C[i, j, k]
+            b = C[i+1, j, k]
+            c = C[i, j+1, k]
+            d = C[i+1, j+1, k]
 
-        tpb_z += is_tpb(a, b, c, d, phases)
+            tpb_z += is_tpb(a, b, c, d, phases)
+        end
     end
 
     return (tpb_x * spacing[1] + tpb_y * spacing[2] + tpb_z * spacing[3]) / (length(C) * prod(spacing))

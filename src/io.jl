@@ -2,8 +2,7 @@ using MAT
 function load_microstructure(path; key="C")
     C = matread(path)[key]
     ndims(C) ∈ (2, 3) || error("'$key' must be a 2D or 3D array")
-    all(isinteger, C) || error("'$key' must contain integer phase labels")
-    return Int8.(C)
+    return eltype(C) == Int8 ? C : Int8.(C)
 end
 
 function write_features_csv(path, rows)
