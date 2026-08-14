@@ -5,12 +5,12 @@ using ImageFiltering
 using SparseArrays
 using LinearAlgebra
 using CUDA
-using ImageMorphology
 using AMGX
 using BenchmarkTools
 
 include("volume_fraction.jl")
 include("io.jl")
+include("connectivity.jl")
 
 function createD(connected_mask)
     return padarray(connected_mask, Fill(false, ntuple(_ -> 1, ndims(connected_mask)))) 
@@ -38,18 +38,6 @@ end
             return De, Dw, Dn, Ds
         end
     end
-end
-
-function removing_isolated_particles(C, phase, direction)
-    mask = C .== phase
-    labels = label_components(mask)
-    inlet_labels = unique(selectdim(labels, direction, 1))
-    outlet_labels = unique(selectdim(labels, direction, size(C, direction)))
-    boundary_labels = union(inlet_labels, outlet_labels)
-    boundary_labels = boundary_labels[boundary_labels .!= 0]
-    boundary_set = BitSet(boundary_labels)
-    connected_labels = in.(labels, Ref(boundary_set))
-    return mask .& connected_labels
 end
 
 function phase_ids(conneced_mask)
@@ -278,9 +266,6 @@ function calculate_tortuosity(C, C_connected, ϕ, phase, spacings, direction)
     return τ
 end
 
-const AMGX_DLL =
-    raw"C:\Users\r43341mm\AMGX\build\Release\amgxsh.dll"
-
 const AMGX_CONFIG = """
 {
     "config_version": 2,
@@ -383,6 +368,12 @@ end
 
 function physical_tortuosity(C, phase; direction = 1, spacings=ntuple(_ -> 1.0, ndims(C)))
 
+    if !is_percolated(C, phase, direction)
+        println("Phase $phase does not percolate in direction $direction.")
+        println("τ = Inf")
+        return Inf
+    end
+
     @time A, b, ids, C_connected = matrix_assembely(C, phase, direction, spacings)
 
     println("\n--- AMGX solve ---")
@@ -396,26 +387,12 @@ function physical_tortuosity(C, phase; direction = 1, spacings=ntuple(_ -> 1.0, 
         end
     end
 
-    return calculate_tortuosity(C, C_connected, ϕ, phase, spacings, direction)
-end
+    τ = calculate_tortuosity(C, C_connected, ϕ, phase, spacings, direction)
 
-function main()
-
-    AMGX.set_libAMGX_path(AMGX_DLL)
-    AMGX.initialize()
-
-    try
-        C = load_microstructure("inputs/2.mat")
-
-        τ1 = physical_tortuosity(C, 1; direction=1)
-        τ2 = physical_tortuosity(C, 2; direction=1)
-
-        println("τ1 = ", τ1)
-        println("τ2 = ", τ2)
-
-    finally
-        AMGX.finalize()
+    if !isfinite(τ) || τ < 1.0
+        @warn "Invalid tortuosity obtained" phase direction τ
+        return Inf
     end
-end
 
-main()
+    return τ
+end
