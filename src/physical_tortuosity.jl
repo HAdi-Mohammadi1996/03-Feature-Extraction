@@ -1,15 +1,19 @@
+import Pkg
+Pkg.activate(raw"C:\Users\r43341mm\AMGX_julia")
+
 using ImageFiltering
 using SparseArrays
-using Krylov
 using LinearAlgebra
 using CUDA
-using LinearOperators
+using ImageMorphology
+using AMGX
+using BenchmarkTools
 
 include("volume_fraction.jl")
+include("io.jl")
 
-function createD(C, phase)
-    D = C .== phase
-    return padarray(D, Fill(false, ntuple(_ -> 1, ndims(C)))) 
+function createD(connected_mask)
+    return padarray(connected_mask, Fill(false, ntuple(_ -> 1, ndims(connected_mask)))) 
 end
 
 @inline function face_D(D, I)
@@ -36,12 +40,24 @@ end
     end
 end
 
-function phase_ids(C, phase)
-    ids = zeros(Int32, size(C))
+function removing_isolated_particles(C, phase, direction)
+    mask = C .== phase
+    labels = label_components(mask)
+    inlet_labels = unique(selectdim(labels, direction, 1))
+    outlet_labels = unique(selectdim(labels, direction, size(C, direction)))
+    boundary_labels = union(inlet_labels, outlet_labels)
+    boundary_labels = boundary_labels[boundary_labels .!= 0]
+    boundary_set = BitSet(boundary_labels)
+    connected_labels = in.(labels, Ref(boundary_set))
+    return mask .& connected_labels
+end
+
+function phase_ids(conneced_mask)
+    ids = zeros(Int32, size(conneced_mask))
     n = 0
 
-    @inbounds for i in eachindex(C)
-        if C[i] == phase
+    @inbounds for i in eachindex(conneced_mask)
+        if conneced_mask[i]
             n += 1
             ids[i] = n
         end
@@ -53,7 +69,11 @@ function matrix_assembely(C, phase, direction, spacings)
 
     direction ∈ 1:ndims(C) || error("Invalid trasport direction")
 
-    ids, N = phase_ids(C, phase)
+    C_connected = removing_isolated_particles(C, phase, direction)
+
+    ids, N = phase_ids(C_connected)
+    D = createD(C_connected)
+
     Nx = size(C, 1)
     Ny = size(C, 2)
     Nz = ndims(C) == 3 ? size(C, 3) : 1
@@ -66,9 +86,7 @@ function matrix_assembely(C, phase, direction, spacings)
     J = Int[]
     V = Float64[]
 
-    D = createD(C, phase)
-
-    @inbounds for index in CartesianIndices(C)
+    @inbounds for index in CartesianIndices(C_connected)
 
         p = ids[index]
         p == 0 && continue
@@ -215,10 +233,10 @@ function matrix_assembely(C, phase, direction, spacings)
     end
 
     A = sparse(I, J, V, N, N)
-    return A, b, ids
+    return A, b, ids, C_connected
 end
 
-function calculate_tortuosity(C, ϕ, phase, spacings, direction)
+function calculate_tortuosity(C, C_connected, ϕ, phase, spacings, direction)
 
     # τ = ε * D0 / D_eff, where D0 = 1.0
     # Here, along direction="i" : D_eff = -<j_i> / (ΔC/L)
@@ -236,8 +254,8 @@ function calculate_tortuosity(C, ϕ, phase, spacings, direction)
 
     @inbounds for n in 1:(Ndir-1)
 
-        C1 = selectdim(C, direction, n)
-        C2 = selectdim(C, direction, n+1)
+        C1 = selectdim(C_connected, direction, n)
+        C2 = selectdim(C_connected, direction, n+1)
 
         ϕ1 = selectdim(ϕ, direction, n)
         ϕ2 = selectdim(ϕ, direction, n+1)
@@ -245,7 +263,7 @@ function calculate_tortuosity(C, ϕ, phase, spacings, direction)
         Q = 0.0
 
         @inbounds for i in eachindex(C1)
-            if C1[i] == phase && C2[i] == phase
+            if C1[i] && C2[i]
                 Q += (ϕ1[i] - ϕ2[i])/h
             end
         end
@@ -260,25 +278,115 @@ function calculate_tortuosity(C, ϕ, phase, spacings, direction)
     return τ
 end
 
+const AMGX_DLL =
+    raw"C:\Users\r43341mm\AMGX\build\Release\amgxsh.dll"
+
+const AMGX_CONFIG = """
+{
+    "config_version": 2,
+    "solver": {
+        "solver": "PCG",
+        "preconditioner": {
+            "solver": "AMG",
+            "algorithm": "AGGREGATION",
+            "selector": "SIZE_2",
+            "smoother": {
+                "solver": "BLOCK_JACOBI",
+                "relaxation_factor": 0.8
+            },
+            "presweeps": 0,
+            "postsweeps": 3,
+            "max_iters": 1,
+            "max_levels": 50,
+            "coarse_solver": "NOSOLVER",
+            "cycle": "V"
+        },
+        "max_iters": 500,
+        "tolerance": 1e-6,
+        "convergence": "RELATIVE_INI",
+        "norm": "L2",
+        "monitor_residual": 1,
+        "store_res_history": 1,
+        "print_solve_stats": 1
+    }
+}
+"""
+
+function solve_amgx(A, b)
+
+    config    = AMGX.Config(AMGX_CONFIG)
+    resources = AMGX.Resources(config)
+
+    matrix = AMGX.AMGXMatrix(resources, AMGX.dDDI)
+    rhs    = AMGX.AMGXVector(resources, AMGX.dDDI)
+    x_amgx = AMGX.AMGXVector(resources, AMGX.dDDI)
+    solver = AMGX.Solver(resources, AMGX.dDDI, config)
+
+    try
+        @time begin
+        @assert issymmetric(A)
+        # A is symmetric, so its CSC storage can be used as CSR
+        # after converting Julia's 1-based indices to AMGX's 0-based indices.
+        # Convert Julia CSC -> GPU CSR
+        @assert size(A, 1) <= typemax(Cint)
+        @assert nnz(A) <= typemax(Cint)
+
+        row_ptr = Cint.(A.colptr .- 1)
+        col_idx = Cint.(A.rowval .- 1)
+        values  = A.nzval
+        end
+
+        @assert row_ptr[1] == 0
+        @assert row_ptr[end] == nnz(A)  
+        
+        # Upload matrix and RHS to AMGX
+        println("Uploading to AMGX...")
+        @time begin
+            AMGX.upload!(matrix, row_ptr, col_idx, values)
+            AMGX.upload!(rhs, b)
+            # Initial guess x = 0
+            AMGX.set_zero!(x_amgx, length(b))
+        end
+        
+        # Solver setup
+        println("AMGX setup...")
+        @time AMGX.setup!(solver, matrix)
+
+        # Solve Ax = b
+        println("AMGX solve...")
+        @time AMGX.solve!(x_amgx, solver, rhs)
+
+        status = AMGX.get_status(solver)
+        niter  = AMGX.get_iterations_number(solver)
+
+        println("AMGX status     = ", status)
+        println("AMGX iterations = ", niter)
+
+        status == AMGX.SUCCESS ||
+            @warn "AMGX did not converge successfully" status
+
+        # GPU -> CPU
+        x = Vector(x_amgx)
+
+        return x
+
+    finally
+        # IMPORTANT: close in dependency order
+        close(solver)
+        close(x_amgx)
+        close(rhs)
+        close(matrix)
+        close(resources)
+        close(config)
+    end
+end
+
 function physical_tortuosity(C, phase; direction = 1, spacings=ntuple(_ -> 1.0, ndims(C)))
 
-    A, b, ids = matrix_assembely(C, phase, direction, spacings)
+    @time A, b, ids, C_connected = matrix_assembely(C, phase, direction, spacings)
 
-    A_gpu = CuSparseMatrixCSR(A)
-    b_gpu = CuVector(b)
-
-    d = diag(A)
-    any(d .<= 0) && error("A is not positive definite / has invalid diagonal")
-    dinv_gpu = CuVector(1.0 ./ d)
-    n = length(b_gpu)
-
-    M = LinearOperator(Float64, n, n, true, true, (y, x) -> (y .= dinv_gpu .* x))
-
-    # x_gpu, stats_gpu = minres_qlp(A_gpu, b_gpu, atol=1e-12, rtol=1e-12, itmax=1000)
-    # x_gpu, stats_gpu = cg(A_gpu, b_gpu, atol=1e-12, rtol=1e-12, itmax=1000)
-    x_gpu, stats_gpu = cg(A_gpu, b_gpu, M=M, atol=1e-12, rtol=1e-12, itmax=1000)
-    stats_gpu.solved || @warn "Solver did not converge"
-    x = Array(x_gpu)
+    println("\n--- AMGX solve ---")
+    x = solve_amgx(A, b)
     ϕ = zeros(Float64, size(C))
 
     @inbounds for i in eachindex(ids)
@@ -288,5 +396,26 @@ function physical_tortuosity(C, phase; direction = 1, spacings=ntuple(_ -> 1.0, 
         end
     end
 
-    return calculate_tortuosity(C, ϕ, phase, spacings, direction)
+    return calculate_tortuosity(C, C_connected, ϕ, phase, spacings, direction)
 end
+
+function main()
+
+    AMGX.set_libAMGX_path(AMGX_DLL)
+    AMGX.initialize()
+
+    try
+        C = load_microstructure("inputs/2.mat")
+
+        τ1 = physical_tortuosity(C, 1; direction=1)
+        τ2 = physical_tortuosity(C, 2; direction=1)
+
+        println("τ1 = ", τ1)
+        println("τ2 = ", τ2)
+
+    finally
+        AMGX.finalize()
+    end
+end
+
+main()
