@@ -34,12 +34,13 @@ function main()
     try
         Nx = 240
         Ny = 800
-        h = 20
+        h = [5, 10, 20, 40, 80]
 
         α = range(start=0.0, stop=75.0, length=15)
 
         τ_exact = zeros(Float64, length(α))
-        τ_calculated = zeros(Float64, length(α))
+        τ_calculated_alpha = zeros(Float64, length(α))
+        τ_calculated_h = zeros(Float64, length(h))
 
         for i in eachindex(α)
 
@@ -47,30 +48,56 @@ function main()
 
             τ_exact[i] = analytical_tau(α[i])
 
-            C = tilted_channel(Nx, Ny, h, α[i])
+            C = tilted_channel(Nx, Ny, h[3], α[i])
 
-            τ_calculated[i] = physical_tortuosity(C, 1; direction=1, spacings=(1.0, 1.0))
+            τ_calculated_alpha[i] = physical_tortuosity(C, 1; direction=1, spacings=(1.0, 1.0))
+        end
+
+        for i in eachindex(h)
+            println("h = $h[i]")
+
+            C = tilted_channel(Nx, Ny, h[i], 45)
+
+            τ_calculated_h[i] = physical_tortuosity(C, 1; direction=1, spacings=(1.0, 1.0))
         end
 
         α_smooth = range(0.0, 75.0, length=500)
         τ_smooth = analytical_tau.(α_smooth)
 
         xticks_l = ([0, 20, 40, 60], [L"0", L"20", L"40", L"60"])
-        yticks1 = ([2, 4, 6, 8, 10, 12, 14],
+        yticks_l = ([2, 4, 6, 8, 10, 12, 14],
                  [L"2", L"4", L"6", L"8", L"10", L"12", L"14"])
 
-        p = scatter(α, τ_calculated; label=L"\mathrm{Numerical}", markershape=:circle,
+        p = scatter(α, τ_calculated_alpha; label=L"\mathrm{Numerical}", markershape=:circle,
                     markersize=4, markercolor=:white, markerstrokecolor=:red,
                     markerstrokewidth=1.0)
         p = plot!(p, α_smooth, τ_smooth; label=L"\mathrm{Analytical}\;τ=\sec^2α",
-                 linewidth=1.5, xlabel=L"α", ylabel=L"τ", xticks=xticks_l, yticks=yticks1,
+                 linewidth=1.5, xlabel=L"α", ylabel=L"τ", xticks=xticks_l, yticks=yticks_l,
                  size=(400, 400), dpi=300, framestyle=:box, grid=true, minorgrid=false,
                  legend=:topleft, linecolor=:black, tickfontsize=8, guidefontsize=10,
                  legendfontsize=8)
 
+        # plot!(p, α_smooth, τ_smooth; subplot=2, inset=(1, bbox(0.15, 0.40, 0.42, 0.32)),
+        #         xlims=(42, 48), ylims=(1.75, 2.35), label=false, linecolor=:black,
+        #         linewidth=1.2, grid=false, framestyle=:box, tickfontsize=6,
+        #         xticks=([43, 45, 47], [L"43", L"45", L"47"]),
+        #         yticks=([1.75, 2.05, 2.35], [L"1.75", L"2.05", L"2.35"]))
+
+        # shapes = [:square, :diamond, :circle, :star5, :hexagon]
+
+        # for i in eachindex(h)
+        #     p = scatter!(p, [45], [τ_calculated_h[i]];
+        #     label=latexstring("h/Δx = $(h[i])"), markershape=shapes[i],
+        #     markersize=3, markercolor=:white, markerstrokewidth=1.0, markerstrokecolor=:black)
+
+        #     p = scatter!(p, [45], [τ_calculated_h[i]]; subplot=2,
+        #     label=false, markershape=shapes[i],
+        #     markersize=3, markercolor=:white, markerstrokewidth=1.0, markerstrokecolor=:black)
+        # end
+
         display(p)
 
-        return α, τ_exact, τ_calculated
+        # return α, τ_exact, τ_calculated_alpha, τ_calculated_h
 
         finally
             AMGX.finalize()
