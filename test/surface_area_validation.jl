@@ -1,13 +1,15 @@
 using GLMakie
 using LaTeXStrings
+using CairoMakie
 
 include("../src/surface_area.jl")
 
-const Nx, Ny, Nz = 20, 20, 20
-ticks_l = ([-10, -5, 0, 5, 10], [L"-10", L"-5", L"0", L"5", L"10"])
+const Lx, Ly, Lz = 20, 20, 20
+const resolution = [20, 40, 80, 160]
 
-function make_cube(;a=Nx÷2)
+function make_cube(Nx, Ny, Nz; a_frac=0.5)
     C = zeros(UInt8, Nx, Ny, Nz)
+    a = round(Int, a_frac*min(Nx, Ny, Nz))
     a <= min(Nx, Ny, Nz) || error("large a")
     cx = (Nx + 1) / 2
     cy = (Ny + 1) / 2
@@ -22,11 +24,12 @@ function make_cube(;a=Nx÷2)
             C[i, j, k] = 1
         end
     end
-    return C
+    return C, a
 end
 
-function make_cube_rot(;a=Nx÷2, θ=45)
+function make_cube_rot(Nx, Ny, Nz; a_frac=0.5, θ=45)
     C = zeros(UInt8, Nx, Ny, Nz)
+    a = round(Int, a_frac*min(Nx, Ny, Nz))
     a <= min(Nx, Ny, Nz) || error("large a")
     cx = (Nx + 1) / 2
     cy = (Ny + 1) / 2
@@ -47,23 +50,27 @@ function make_cube_rot(;a=Nx÷2, θ=45)
             C[i, j, k] = 1
         end
     end
-    return C
+    return C, a
 end
 
-function make_sphere(;r=7)
+function make_sphere(Nx, Ny, Nz; r_frac=0.35)
     C = zeros(UInt8, Nx, Ny, Nz)
+    r = round(Int, r_frac*min(Nx, Ny, Nz))
     r <= min(Nx, Ny, Nz)÷2 || error("large r")
-    O = [Nx÷2, Ny÷2, Nz÷2]
+
+    cx = (Nx + 1) / 2
+    cy = (Ny + 1) / 2
+    cz = (Nz + 1) / 2
 
     @inbounds for k in 1:Nz, j in 1:Ny, i in 1:Nx
-        if (i - O[1])^2 + (j - O[2])^2 + (k - O[3])^2 <= r^2
+        if (i - cx)^2 + (j - cy)^2 + (k - cz)^2 <= r^2
             C[i, j, k] = 1
         end
     end
-    return C
+    return C, r
 end
 
-function make_multicube()
+function make_multicube(Nx, Ny, Nz)
     C = zeros(UInt8, Nx, Ny, Nz)
     C[1:10, 1:10, 1:5] .= 1
     C[6:15, 6:15, 6:15] .= 2
@@ -76,147 +83,109 @@ const SHAPE_NAMES = [:cube, :cube_rot, :multicube, :sphere]
 const PHASE_COLORS = [:gray, :blue, :green]
 
 const GEOMETRIES = Dict(
-    :cube => make_cube,
-    :cube_rot => make_cube_rot,
-    :multicube => make_multicube,
-    :sphere => make_sphere
+    :cube       => () -> first(make_cube(20, 20, 20)),
+    :cube_rot   => () -> first(make_cube_rot(20, 20, 20)),
+    :multicube  => () -> make_multicube(20, 20, 20),
+    :sphere     => () -> first(make_sphere(20, 20, 20))
 )
 const ANALYTICAL_REFERENCE = Dict(
-    :cube => 0.075,
-    :cube_rot => 0.075,
-    :multicube => 0.075,
-    :sphere => 49*π/2000
+    :cube       => 0.0750,
+    :cube_rot   => 0.0750,
+    :multicube  => 0.0500,
+    :sphere     => 4*49*π/(Lx*Ly*Lz)
 )
 
-function main()
+function main_benchmark()
 
-    shape = :sphere
+    for i in 1:length(SHAPE_NAMES)
 
-    C = GEOMETRIES[shape]()
-    fig = Figure(size=(600, 600))
+        shape = SHAPE_NAMES[i]
+        C = GEOMETRIES[shape]()
+        dx = Lx / resolution[1]
+        dy = Ly / resolution[1]
+        dz = Lz / resolution[1]
 
-    ax = Axis3(fig[1,1], aspect=:data, width=Relative(0.9), height=Relative(0.9), xlabel="", ylabel="", zlabel="",
-                xticks=ticks_l, yticks=ticks_l, zticks=ticks_l)
+        ssa_calculated = specific_surface_area(C, 1; spacing=(dx, dy, dz), σ=0.0)
+        ssa_analytical = ANALYTICAL_REFERENCE[shape]
+        error_A = 100 * abs(ssa_calculated - ssa_analytical) / ssa_analytical
 
-    voxels!(ax, -10..10, -10..10, -10..10, C; gap=0.1, color=PHASE_COLORS)
+        fig = Figure(size=(600, 600), figure_padding=0)
+        ticks_l = ([-10, -5, 0, 5, 10], [L"-10", L"-5", L"0", L"5", L"10"])
+        Label(fig[1,1], L"""
+        \mathrm{ssa}_\mathrm{analytical} = %$(round(ssa_analytical, digits=3)),  
+        
+        \mathrm{ssa}_\mathrm{numerical} = %$(round(ssa_calculated, digits=3)),  
 
-    ssa_calculated = specific_surface_area(C, 1; spacing=(1.0, 1.0, 1.0), σ=0.0)
-    ssa_analytical = ANALYTICAL_REFERENCE[shape]
-    error_A = 100 * abs(ssa_calculated - ssa_analytical) / ssa_analytical
+        ε = %$(round(error_A, digits=2))\%
+        """;
+        halign=:center, tellwidth=false, tellheight=false, fontsize=16)
+        ax = Axis3(fig[2,1], aspect=:data, width=Relative(1.0), height=Relative(1.0), xlabel="", ylabel="", zlabel="",
+                    xticks=ticks_l, yticks=ticks_l, zticks=ticks_l)
 
-    Label(fig[1,1], L"""
-    a_{s,\mathrm{analytical}} = %$(round(ssa_analytical, digits=4))
-    
-    a_{s,\mathrm{numerical}} = %$(round(ssa_calculated, digits=4))
-
-    ε = %$(round(error_A, digits=2))\%
-    """;
-    halign=:center, valign=:top, tellwidth=false, tellheight=false, fontsize=17)
-    
-    fig
+        rowsize!(fig.layout, 1, Fixed(25))
+        rowgap!(fig.layout, 0)
+        voxels!(ax, -10..10, -10..10, -10..10, C; gap=0.1, color=PHASE_COLORS)
+        xlims!(ax, -10, 10)
+        ylims!(ax, -10, 10)
+        zlims!(ax, -10, 10)
+        save("test/results/ssa/$(shape).png", fig; px_per_unit=3)
+    end
 end
 
-main()
+function sphere_grid_resolution()
+    error_A_nosmooth = Float64[]
+    error_A_smooth = Float64[]
+    for N in resolution
+        dx = Lx / N
+        dy = Ly / N
+        dz = Lz / N
+        C, r = make_sphere(N, N, N)
+        ssa_calculated_nosmooth = specific_surface_area(C, 1; spacing=(dx, dy, dz), σ=0.0)
+        ssa_calculated_withsmooth = specific_surface_area(C, 1; spacing=(dx, dy, dz), σ=1.0)
+        ssa_analytical = 4*π*(r*dx)^2/(Lx*Ly*Lz)
+        push!(error_A_nosmooth, 100 * (ssa_calculated_nosmooth - ssa_analytical) / ssa_analytical)
+        push!(error_A_smooth, 100 * (ssa_calculated_withsmooth - ssa_analytical) / ssa_analytical)
+    end
+        fig = Figure(size=(500, 250), figure_padding=0)
+        ticks_x = ([0, 50, 100, 150], [L"0", L"50", L"100", L"150"])
+        ticks_y = ([-1, 0, 1, 2, 3], [L"-1", L"0", L"1", L"2", L"3"])
+        ax = Axis(fig[1, 1], xlabel=L"\text{Grid Resolution}", ylabel=L"\text{Relative error }[\%]",
+                    xticks=ticks_x, yticks=ticks_y)
+        hlines!(ax, [0], linestyle=:dash, color=:black)
+        scatterlines!(ax, resolution, error_A_nosmooth; linewidth=2, label=L"σ=0.0", color=:black, marker=:circle)
+        scatterlines!(ax, resolution, error_A_smooth; linewidth=2, label=L"σ=1.0", color=:black, marker=:rect)
+        axislegend(ax; orientation=:horizontal, position=:cb)
+        save("test/results/ssa/sphere_grid_resolution.svg", fig; backend=CairoMakie)
 
-# function geom_plot(C, title::String)
-#     p = nothing
-#     for phase in (1, 2, 3)
-#         idx = findall(==(phase), C)
-#         isempty(idx) && continue
+end
 
-#         xs = [i.I[1] for i in idx]
-#         ys = [i.I[2] for i in idx]
-#         zs = [i.I[3] for i in idx]
-#         kw = (
-#             color=PHASE_COLORS[phase],
-#             markershape=:square,
-#             markersize=2,
-#             markerstrokecolor=:black,
-#             markerstrokewidth=0.2,
-#             label="",
-#         )
+function cube_grid_resolution()
+    error_A_nosmooth = Float64[]
+    error_A_smooth = Float64[]
+    for N in resolution
+        dx = Lx / N
+        dy = Ly / N
+        dz = Lz / N
+        C, a = make_cube(N, N, N)
+        ssa_calculated_nosmooth = specific_surface_area(C, 1; spacing=(dx, dy, dz), σ=0.0)
+        ssa_calculated_withsmooth = specific_surface_area(C, 1; spacing=(dx, dy, dz), σ=1.0)
+        ssa_analytical = 6*(a*dx)^2/(Lx*Ly*Lz)
+        push!(error_A_nosmooth, 100 * (ssa_calculated_nosmooth - ssa_analytical) / ssa_analytical)
+        push!(error_A_smooth, 100 * (ssa_calculated_withsmooth - ssa_analytical) / ssa_analytical)
+    end
+        fig = Figure(size=(500, 250), figure_padding=0)
+        ticks_x = ([0, 50, 100, 150], [L"0", L"50", L"100", L"150"])
+        ticks_y = ([-15, -10, -5, 0], [L"-15", L"-10", L"-5", L"0"])
+        ax = Axis(fig[1, 1], xlabel=L"\text{Grid Resolution}", ylabel=L"\text{Relative error }[\%]",
+                    xticks=ticks_x, yticks=ticks_y)
+        hlines!(ax, [0], linestyle=:dash, color=:black)
+        scatterlines!(ax, resolution, error_A_nosmooth; linewidth=2, label=L"σ=0.0", color=:black, marker=:circle)
+        scatterlines!(ax, resolution, error_A_smooth; linewidth=2, label=L"σ=1.0", color=:black, marker=:rect)
+        axislegend(ax; orientation=:horizontal, position=:cb)
+        save("test/results/ssa/cube_grid_resolution.svg", fig; backend=CairoMakie)
 
-#         if p === nothing
-#             p = scatter(xs, ys, zs;
-#                 kw...,
-#                 title=title,
-#                 xlim=(0, NX), ylim=(0, NY), zlim=(0, NZ),
-#                 aspect_ratio=1,
-#                 camera=(45, 30),
-#                 legend=false,
-#             )
-#         else
-#             scatter!(p, xs, ys, zs; kw...)
-#         end
-#     end
+end
 
-#     return p === nothing ? plot(title=title, legend=false) : p
-# end
-
-# function save_surface_area_figure(; outdir=joinpath(@__DIR__, "figures"))
-#     mkpath(outdir)
-#     plots = [voxel_plot(GEOMETRIES[name](), string(name)) for name in SHAPE_NAMES]
-#     fig = plot(plots..., layout=(1, 5), size=(1600, 400),
-#         plot_title="Surface area test shapes")
-#     path = joinpath(outdir, "surface_area_shapes.png")
-#     savefig(fig, path)
-#     return path
-# end
-
-# function validate_surface_area(; make_figure=true)
-#     println("="^80)
-#     println("Surface Area Validation - Comparison with TauFactor Reference Values")
-#     println("="^80)
-#     println("Grid resolution: $(NX) x $(NY) x $(NZ) voxels")
-#     println("Method: smoothed gradient specific surface area")
-#     println("Smoothing parameter (sigma): 1.0")
-#     println("Voxel size: 1.0")
-#     println("Tolerance: +/- $(100 * SURFACE_AREA_RTOL)%")
-#     println("="^80)
-
-#     computed_areas = Dict{Symbol,Float64}()
-#     for name in SHAPE_NAMES
-#         C = GEOMETRIES[name]()
-#         computed_areas[name] = surface_area(C, 1; voxel_size=1.0, sigma=1.0)
-#     end
-
-#     figure_path = make_figure ? save_surface_area_figure() : nothing
-
-#     println()
-#     println("Validation Results:")
-#     println("="^80)
-#     println(rpad("Shape", 14), rpad("Computed", 14), rpad("TauFactor", 16),
-#         rpad("Diff (%)", 12), "Status")
-#     println("-"^80)
-
-#     diffs = Float64[]
-
-#     @testset "TauFactor smoothed-gradient specific surface area" begin
-#         for name in SHAPE_NAMES
-#             computed = computed_areas[name]
-#             reference = TAUFACTOR_REFERENCE[name]
-#             diff_pct = 100 * (computed - reference) / reference
-#             push!(diffs, abs(diff_pct))
-
-#             passed = isapprox(computed, reference; rtol=SURFACE_AREA_RTOL)
-#             status = passed ? "PASS" : "FAIL"
-
-#             @printf("%-14s %.5f        %.5f             %+7.2f %%   %s\n",
-#                 String(name), computed, reference, diff_pct, status)
-
-#             @test computed ≈ reference rtol = SURFACE_AREA_RTOL
-#         end
-#     end
-
-#     println("="^80)
-#     println("Mean absolute error: $(round(mean(diffs), digits=2))%")
-#     println("Maximum absolute error: $(round(maximum(diffs), digits=2))%")
-#     if figure_path !== nothing
-#         println("Figure saved to: ", figure_path)
-#     end
-#     println("="^80)
-
-#     return computed_areas
-# end
-
-# results = validate_surface_area()
+sphere_grid_resolution()
+cube_grid_resolution()
+main_benchmark()
