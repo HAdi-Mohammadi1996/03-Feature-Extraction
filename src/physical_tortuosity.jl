@@ -297,18 +297,21 @@ const AMGX_CONFIG = """
 }
 """
 
-function solve_amgx(A, b)
+function solve_amgx(A, b, manage_amgx)
+
+    if manage_amgx
+        AMGX.set_libAMGX_path(raw"C:\Users\r43341mm\AMGX\build\Release\amgxsh.dll")
+        AMGX.initialize()
+    end
 
     config    = AMGX.Config(AMGX_CONFIG)
     resources = AMGX.Resources(config)
-
     matrix = AMGX.AMGXMatrix(resources, AMGX.dDDI)
     rhs    = AMGX.AMGXVector(resources, AMGX.dDDI)
     x_amgx = AMGX.AMGXVector(resources, AMGX.dDDI)
     solver = AMGX.Solver(resources, AMGX.dDDI, config)
 
     try
-        @time begin
         @assert issymmetric(A)
         # A is symmetric, so its CSC storage can be used as CSR
         # after converting Julia's 1-based indices to AMGX's 0-based indices.
@@ -319,27 +322,24 @@ function solve_amgx(A, b)
         row_ptr = Cint.(A.colptr .- 1)
         col_idx = Cint.(A.rowval .- 1)
         values  = A.nzval
-        end
 
         @assert row_ptr[1] == 0
         @assert row_ptr[end] == nnz(A)  
         
         # Upload matrix and RHS to AMGX
         println("Uploading to AMGX...")
-        @time begin
-            AMGX.upload!(matrix, row_ptr, col_idx, values)
-            AMGX.upload!(rhs, b)
-            # Initial guess x = 0
-            AMGX.set_zero!(x_amgx, length(b))
-        end
-        
+        AMGX.upload!(matrix, row_ptr, col_idx, values)
+        AMGX.upload!(rhs, b)
+        # Initial guess x = 0
+        AMGX.set_zero!(x_amgx, length(b))
+    
         # Solver setup
         println("AMGX setup...")
-        @time AMGX.setup!(solver, matrix)
+        AMGX.setup!(solver, matrix)
 
         # Solve Ax = b
         println("AMGX solve...")
-        @time AMGX.solve!(x_amgx, solver, rhs)
+        AMGX.solve!(x_amgx, solver, rhs)
 
         status = AMGX.get_status(solver)
         niter  = AMGX.get_iterations_number(solver)
@@ -363,10 +363,13 @@ function solve_amgx(A, b)
         close(matrix)
         close(resources)
         close(config)
+        if manage_amgx
+            AMGX.finalize()
+        end
     end
 end
 
-function physical_tortuosity(C, phase; direction = 1, spacings=ntuple(_ -> 1.0, ndims(C)))
+function physical_tortuosity(C, phase; direction = 1, spacings=ntuple(_ -> 1.0, ndims(C)), manage_amgx=true)
 
     if !is_percolated(C, phase, direction)
         println("Phase $phase does not percolate in direction $direction.")
@@ -377,7 +380,7 @@ function physical_tortuosity(C, phase; direction = 1, spacings=ntuple(_ -> 1.0, 
     @time A, b, ids, C_connected = matrix_assembely(C, phase, direction, spacings)
 
     println("\n--- AMGX solve ---")
-    x = solve_amgx(A, b)
+    x = solve_amgx(A, b, manage_amgx)
     ϕ = zeros(Float64, size(C))
 
     @inbounds for i in eachindex(ids)

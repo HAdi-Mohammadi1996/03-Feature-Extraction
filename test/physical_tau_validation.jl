@@ -1,25 +1,31 @@
-
 include("../src/physical_tortuosity.jl")
-using Plots
+using GLMakie
+using CairoMakie
 using LaTeXStrings
+
+const Lx, Ly, H = 2.4, 8.0, 0.2
+dx = [0.1, 0.01, 0.001]
 
 function analytical_tau(α)
     return 1/cosd(α)^2
 end
 
-function tilted_channel(Nx, Ny, h, α)
+function tilted_channel(Nx, Ny, Δx, H, α)
     C = zeros(Int8, Nx, Ny)
 
     m = tand(α)
-    yc = Ny / 2
+    xc = Lx / 2
+    yc = Ly / 2
 
     @inbounds for j in 1:Ny, i in 1:Nx
-        yline = yc + m * (i - Nx/2)
+        x = (i-0.5) * Δx
+        y = (j-0.5) * Δx
 
-        # perpendicular distance from point to channel centreline
-        d = abs(j - yline) / sqrt(1 + m^2)
+        yline = yc + m * (x - xc)
 
-        if d <= h/2
+        d = abs(y - yline) / sqrt(1 + m^2)
+
+        if d <= H/2
             C[i,j] = 1
         end
     end
@@ -27,20 +33,18 @@ function tilted_channel(Nx, Ny, h, α)
     return C
 end
 
-function main()
+function main_tau_benchmark()
 
     AMGX.set_libAMGX_path(raw"C:\Users\r43341mm\AMGX\build\Release\amgxsh.dll")
     AMGX.initialize()
     try
-        Nx = 240
-        Ny = 800
-        h = [5, 10, 20, 40, 80]
+        Nx = round(Int, Lx/dx[2])
+        Ny = round(Int, Ly/dx[2])
 
-        α = range(start=0.0, stop=75.0, length=15)
+        α = range(start=0.0, stop=70.0, length=15)
 
         τ_exact = zeros(Float64, length(α))
         τ_calculated_alpha = zeros(Float64, length(α))
-        τ_calculated_h = zeros(Float64, length(h))
 
         for i in eachindex(α)
 
@@ -48,61 +52,79 @@ function main()
 
             τ_exact[i] = analytical_tau(α[i])
 
-            C = tilted_channel(Nx, Ny, h[3], α[i])
+            C = tilted_channel(Nx, Ny, dx[2], H, α[i])
 
-            τ_calculated_alpha[i] = physical_tortuosity(C, 1; direction=1, spacings=(1.0, 1.0))
+            τ_calculated_alpha[i] = physical_tortuosity(C, 1; direction=1, spacings=(dx[2], dx[2]))
         end
 
-        for i in eachindex(h)
-            println("h = $h[i]")
-
-            C = tilted_channel(Nx, Ny, h[i], 45)
-
-            τ_calculated_h[i] = physical_tortuosity(C, 1; direction=1, spacings=(1.0, 1.0))
-        end
-
-        α_smooth = range(0.0, 75.0, length=500)
+        α_smooth = range(0.0, 70.0, length=500)
         τ_smooth = analytical_tau.(α_smooth)
 
         xticks_l = ([0, 20, 40, 60], [L"0", L"20", L"40", L"60"])
         yticks_l = ([2, 4, 6, 8, 10, 12, 14],
                  [L"2", L"4", L"6", L"8", L"10", L"12", L"14"])
 
-        p = scatter(α, τ_calculated_alpha; label=L"\mathrm{Numerical}", markershape=:circle,
-                    markersize=4, markercolor=:white, markerstrokecolor=:red,
-                    markerstrokewidth=1.0)
-        p = plot!(p, α_smooth, τ_smooth; label=L"\mathrm{Analytical}\;τ=\sec^2α",
-                 linewidth=1.5, xlabel=L"α", ylabel=L"τ", xticks=xticks_l, yticks=yticks_l,
-                 size=(400, 400), dpi=300, framestyle=:box, grid=true, minorgrid=false,
-                 legend=:topleft, linecolor=:black, tickfontsize=8, guidefontsize=10,
-                 legendfontsize=8)
+        fig = Figure(size=(400, 250), figure_padding=3)
 
-        # plot!(p, α_smooth, τ_smooth; subplot=2, inset=(1, bbox(0.15, 0.40, 0.42, 0.32)),
-        #         xlims=(42, 48), ylims=(1.75, 2.35), label=false, linecolor=:black,
-        #         linewidth=1.2, grid=false, framestyle=:box, tickfontsize=6,
-        #         xticks=([43, 45, 47], [L"43", L"45", L"47"]),
-        #         yticks=([1.75, 2.05, 2.35], [L"1.75", L"2.05", L"2.35"]))
+        ax = Axis(fig[1, 1], xlabel=L"α", ylabel=L"τ", xticks=xticks_l, yticks=yticks_l,
+                    xgridvisible=true, ygridvisible=true, topspinevisible=true, rightspinevisible=true)
+        
+        p_num = scatter!(ax, α, τ_calculated_alpha; marker=:circle,
+                color=:white, strokecolor=:red, strokewidth=1.0)
 
-        # shapes = [:square, :diamond, :circle, :star5, :hexagon]
+        p_ana = lines!(ax, α_smooth, τ_smooth; linewidth=1.5, color=:black)
 
-        # for i in eachindex(h)
-        #     p = scatter!(p, [45], [τ_calculated_h[i]];
-        #     label=latexstring("h/Δx = $(h[i])"), markershape=shapes[i],
-        #     markersize=3, markercolor=:white, markerstrokewidth=1.0, markerstrokecolor=:black)
-
-        #     p = scatter!(p, [45], [τ_calculated_h[i]]; subplot=2,
-        #     label=false, markershape=shapes[i],
-        #     markersize=3, markercolor=:white, markerstrokewidth=1.0, markerstrokecolor=:black)
-        # end
-
-        display(p)
-
-        # return α, τ_exact, τ_calculated_alpha, τ_calculated_h
+        axislegend(ax, [p_ana, p_num], [L"\mathrm{Analytical}\;\tau=\sec^2\alpha",
+                     L"\mathrm{Numerical}"]; position=:lt, framevisible=false)
+    
+        xlims!(ax, 0, 70.5)
+        ylims!(ax, 0, 9)
+        save("test/results/tau/tau_validation.svg", fig; backend=CairoMakie)
 
         finally
             AMGX.finalize()
         end
 end
 
-main()
+function main_tau_grid_sensetivity()
 
+    AMGX.set_libAMGX_path(raw"C:\Users\r43341mm\AMGX\build\Release\amgxsh.dll")
+    AMGX.initialize()
+    try
+        α = 35
+        τ_exact = analytical_tau(α)
+        error = Float64[]
+        τ_calculated_h = Float64[]
+
+        for Δx in dx
+
+            Nx = round(Int, Lx/Δx)
+            Ny = round(Int, Ly/Δx)
+            
+            C = tilted_channel(Nx, Ny, Δx, H, α)
+            tau = physical_tortuosity(C, 1; direction=1, spacings=(Δx, Δx))
+            push!(τ_calculated_h, tau)
+            push!(error, 100 * (tau - τ_exact)/τ_exact)
+        end
+        resolution = H./dx
+        xticks_l = ([0, 20, 200], [L"0", L"20", L"200"])
+        yticks_l = ([0, 20, 40], [L"0", L"20", L"40"])
+
+        fig = Figure(size=(400, 250), figure_padding=3)
+
+        ax = Axis(fig[1, 1], xlabel=L"H/Δx", ylabel=L"\mathrm{Relative\ error}\;[\%]", xticks=xticks_l,
+                    yticks=yticks_l, xscale=log10, xgridvisible=true, ygridvisible=true,
+                    topspinevisible=true, rightspinevisible=true)
+        
+        scatterlines!(ax, resolution, error; marker=:circle, color=:black)
+
+        hlines!(ax, [0], linestyle=:dash, color=:black)
+
+        save("test/results/tau/tau_grid_sensitivity.svg", fig; backend=CairoMakie)
+        finally
+            AMGX.finalize()
+        end
+end
+
+main_tau_benchmark()
+main_tau_grid_sensetivity()
