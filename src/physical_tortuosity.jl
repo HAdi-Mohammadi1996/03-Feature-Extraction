@@ -1,16 +1,5 @@
-import Pkg
-Pkg.activate(raw"C:\Users\r43341mm\AMGX_julia")
-
-using ImageFiltering
-using SparseArrays
-using LinearAlgebra
-using CUDA
-using AMGX
-using BenchmarkTools
-
-include("volume_fraction.jl")
-include("io.jl")
-include("connectivity.jl")
+const AMGX_CONFIG_PATH = normpath(joinpath(@__DIR__, "..", "amgx.json"))
+const config_string = read(AMGX_CONFIG_PATH, String)
 
 function createD(connected_mask)
     return padarray(connected_mask, Fill(false, ntuple(_ -> 1, ndims(connected_mask)))) 
@@ -40,12 +29,12 @@ end
     end
 end
 
-function phase_ids(conneced_mask)
-    ids = zeros(Int32, size(conneced_mask))
+function phase_ids(connected_mask)
+    ids = zeros(Int32, size(connected_mask))
     n = 0
 
-    @inbounds for i in eachindex(conneced_mask)
-        if conneced_mask[i]
+    @inbounds for i in eachindex(connected_mask)
+        if connected_mask[i]
             n += 1
             ids[i] = n
         end
@@ -53,7 +42,7 @@ function phase_ids(conneced_mask)
     return ids, n
 end
 
-function matrix_assembely(C, phase, direction, spacings)
+function matrix_assembly(C, phase, direction, spacings)
 
     direction ∈ 1:ndims(C) || error("Invalid trasport direction")
 
@@ -266,45 +255,14 @@ function calculate_tortuosity(C, C_connected, ϕ, phase, spacings, direction)
     return τ
 end
 
-const AMGX_CONFIG = """
-{
-    "config_version": 2,
-    "solver": {
-        "solver": "PCG",
-        "preconditioner": {
-            "solver": "AMG",
-            "algorithm": "AGGREGATION",
-            "selector": "SIZE_2",
-            "smoother": {
-                "solver": "BLOCK_JACOBI",
-                "relaxation_factor": 0.8
-            },
-            "presweeps": 0,
-            "postsweeps": 3,
-            "max_iters": 1,
-            "max_levels": 50,
-            "coarse_solver": "NOSOLVER",
-            "cycle": "V"
-        },
-        "max_iters": 500,
-        "tolerance": 1e-6,
-        "convergence": "RELATIVE_INI",
-        "norm": "L2",
-        "monitor_residual": 1,
-        "store_res_history": 1,
-        "print_solve_stats": 1
-    }
-}
-"""
-
 function solve_amgx(A, b, manage_amgx)
 
     if manage_amgx
-        AMGX.set_libAMGX_path(raw"C:\Users\r43341mm\AMGX\build\Release\amgxsh.dll")
+        AMGX.set_libAMGX_path(MA.AMGX_DLL)
         AMGX.initialize()
     end
-
-    config    = AMGX.Config(AMGX_CONFIG)
+    
+    config    = AMGX.Config(config_string)
     resources = AMGX.Resources(config)
     matrix = AMGX.AMGXMatrix(resources, AMGX.dDDI)
     rhs    = AMGX.AMGXVector(resources, AMGX.dDDI)
@@ -364,6 +322,7 @@ function solve_amgx(A, b, manage_amgx)
         close(resources)
         close(config)
         if manage_amgx
+            AMGX.finalize_plugins()
             AMGX.finalize()
         end
     end
@@ -377,7 +336,7 @@ function physical_tortuosity(C, phase; direction = 1, spacings=ntuple(_ -> 1.0, 
         return Inf
     end
 
-    @time A, b, ids, C_connected = matrix_assembely(C, phase, direction, spacings)
+    A, b, ids, C_connected = matrix_assembly(C, phase, direction, spacings)
 
     println("\n--- AMGX solve ---")
     x = solve_amgx(A, b, manage_amgx)

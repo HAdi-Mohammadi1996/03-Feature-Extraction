@@ -1,5 +1,3 @@
-using ImageMorphology
-
 function removing_isolated_particles(C, phase, direction)
     direction ∈ 1:ndims(C) || error("Invalid transport direction")
 

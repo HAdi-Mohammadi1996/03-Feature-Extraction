@@ -1,7 +1,8 @@
+include(joinpath(@__DIR__, "..", "src", "MicrostructureAnalysis.jl"))
+import .MicrostructureAnalysis as MA
+
 using GLMakie
 using LaTeXStrings
-
-include("../src/tpb.jl")
 
 const Nx, Ny, Nz = 20, 20, 20
 const PHASE_COLORS = [:gray, :blue, :green]
@@ -27,7 +28,7 @@ function main()
 
     voxels!(ax, -10..10, -10..10, -10..10, C; gap=0.1, color=PHASE_COLORS)
 
-    tpb_calculated = total_tpb_density(C)
+    tpb_calculated = MA.total_tpb_density(C)
     tpb_analytical = 1/(Nx*Ny)
     
     Label(fig[1,1], L"""

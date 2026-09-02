@@ -1,4 +1,7 @@
-include("../src/physical_tortuosity.jl")
+include(joinpath(@__DIR__, "..", "src", "MicrostructureAnalysis.jl"))
+import .MicrostructureAnalysis as MA
+
+using AMGX
 using GLMakie
 using CairoMakie
 using LaTeXStrings
@@ -35,7 +38,7 @@ end
 
 function main_tau_benchmark()
 
-    AMGX.set_libAMGX_path(raw"C:\Users\r43341mm\AMGX\build\Release\amgxsh.dll")
+    AMGX.set_libAMGX_path(MA.AMGX_DLL)
     AMGX.initialize()
     try
         Nx = round(Int, Lx/dx[2])
@@ -54,7 +57,7 @@ function main_tau_benchmark()
 
             C = tilted_channel(Nx, Ny, dx[2], H, α[i])
 
-            τ_calculated_alpha[i] = physical_tortuosity(C, 1; direction=1, spacings=(dx[2], dx[2]))
+            τ_calculated_alpha[i] = MA.physical_tortuosity(C, 1; direction=1, spacings=(dx[2], dx[2]), manage_amgx=false)
         end
 
         α_smooth = range(0.0, 70.0, length=500)
@@ -86,9 +89,9 @@ function main_tau_benchmark()
         end
 end
 
-function main_tau_grid_sensetivity()
+function main_tau_grid_sensitivity()
 
-    AMGX.set_libAMGX_path(raw"C:\Users\r43341mm\AMGX\build\Release\amgxsh.dll")
+    AMGX.set_libAMGX_path(MA.AMGX_DLL)
     AMGX.initialize()
     try
         α = 35
@@ -102,7 +105,7 @@ function main_tau_grid_sensetivity()
             Ny = round(Int, Ly/Δx)
             
             C = tilted_channel(Nx, Ny, Δx, H, α)
-            tau = physical_tortuosity(C, 1; direction=1, spacings=(Δx, Δx))
+            tau = MA.physical_tortuosity(C, 1; direction=1, spacings=(Δx, Δx), manage_amgx=false)
             push!(τ_calculated_h, tau)
             push!(error, 100 * (tau - τ_exact)/τ_exact)
         end
@@ -127,4 +130,4 @@ function main_tau_grid_sensetivity()
 end
 
 main_tau_benchmark()
-main_tau_grid_sensetivity()
+main_tau_grid_sensitivity()

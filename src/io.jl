@@ -1,4 +1,3 @@
-using MAT
 function load_microstructure(path; key="C")
     C = matread(path)[key]
     ndims(C) ∈ (2, 3) || error("'$key' must be a 2D or 3D array")

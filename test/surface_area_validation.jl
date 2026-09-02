@@ -1,8 +1,9 @@
+include(joinpath(@__DIR__, "..", "src", "MicrostructureAnalysis.jl"))
+import .MicrostructureAnalysis as MA
+
 using GLMakie
 using LaTeXStrings
 using CairoMakie
-
-include("../src/surface_area.jl")
 
 const Lx, Ly, Lz = 20, 20, 20
 const resolution = [20, 40, 80, 160]
@@ -105,7 +106,7 @@ function main_benchmark()
         dy = Ly / resolution[1]
         dz = Lz / resolution[1]
 
-        ssa_calculated = specific_surface_area(C, 1; spacing=(dx, dy, dz), σ=0.0)
+        ssa_calculated = MA.specific_surface_area(C, 1; spacing=(dx, dy, dz), σ=0.0)
         ssa_analytical = ANALYTICAL_REFERENCE[shape]
         error_A = 100 * abs(ssa_calculated - ssa_analytical) / ssa_analytical
 
@@ -140,8 +141,8 @@ function sphere_grid_resolution()
         dy = Ly / N
         dz = Lz / N
         C, r = make_sphere(N, N, N)
-        ssa_calculated_nosmooth = specific_surface_area(C, 1; spacing=(dx, dy, dz), σ=0.0)
-        ssa_calculated_withsmooth = specific_surface_area(C, 1; spacing=(dx, dy, dz), σ=1.0)
+        ssa_calculated_nosmooth = MA.specific_surface_area(C, 1; spacing=(dx, dy, dz), σ=0.0)
+        ssa_calculated_withsmooth = MA.specific_surface_area(C, 1; spacing=(dx, dy, dz), σ=1.0)
         ssa_analytical = 4*π*(r*dx)^2/(Lx*Ly*Lz)
         push!(error_A_nosmooth, 100 * (ssa_calculated_nosmooth - ssa_analytical) / ssa_analytical)
         push!(error_A_smooth, 100 * (ssa_calculated_withsmooth - ssa_analytical) / ssa_analytical)
@@ -168,8 +169,8 @@ function cube_grid_resolution()
         dy = Ly / N
         dz = Lz / N
         C, a = make_cube(N, N, N)
-        ssa_calculated_nosmooth = specific_surface_area(C, 1; spacing=(dx, dy, dz), σ=0.0)
-        ssa_calculated_withsmooth = specific_surface_area(C, 1; spacing=(dx, dy, dz), σ=1.0)
+        ssa_calculated_nosmooth = MA.specific_surface_area(C, 1; spacing=(dx, dy, dz), σ=0.0)
+        ssa_calculated_withsmooth = MA.specific_surface_area(C, 1; spacing=(dx, dy, dz), σ=1.0)
         ssa_analytical = 6*(a*dx)^2/(Lx*Ly*Lz)
         push!(error_A_nosmooth, 100 * (ssa_calculated_nosmooth - ssa_analytical) / ssa_analytical)
         push!(error_A_smooth, 100 * (ssa_calculated_withsmooth - ssa_analytical) / ssa_analytical)
