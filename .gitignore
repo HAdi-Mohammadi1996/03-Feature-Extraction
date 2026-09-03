@@ -2,3 +2,6 @@ inputs/
 output/
 .vscode/ 
 test/results
+IMPROVEMENTS.md
+config.toml
+amgx.json
