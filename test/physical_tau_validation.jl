@@ -67,10 +67,11 @@ function main_tau_benchmark()
         yticks_l = ([2, 4, 6, 8, 10, 12, 14],
                  [L"2", L"4", L"6", L"8", L"10", L"12", L"14"])
 
-        fig = Figure(size=(400, 250), figure_padding=3)
+        fig = Figure(size=(500, 300), figure_padding=3)
 
-        ax = Axis(fig[1, 1], xlabel=L"α", ylabel=L"τ", xticks=xticks_l, yticks=yticks_l,
-                    xgridvisible=true, ygridvisible=true, topspinevisible=true, rightspinevisible=true)
+        ax = Axis(fig[1, 1], xlabel=L"α\;[°]", ylabel=L"τ\;[-]", xticks=xticks_l, yticks=yticks_l,
+                    xgridvisible=true, ygridvisible=true, topspinevisible=true, rightspinevisible=true,
+                    xlabelsize=18, ylabelsize=18, xticklabelsize=16, yticklabelsize=16,)
         
         p_num = scatter!(ax, α, τ_calculated_alpha; marker=:circle,
                 color=:white, strokecolor=:red, strokewidth=1.0)
@@ -78,7 +79,7 @@ function main_tau_benchmark()
         p_ana = lines!(ax, α_smooth, τ_smooth; linewidth=1.5, color=:black)
 
         axislegend(ax, [p_ana, p_num], [L"\mathrm{Analytical}\;\tau=\sec^2\alpha",
-                     L"\mathrm{Numerical}"]; position=:lt, framevisible=false)
+                     L"\mathrm{Numerical}"]; position=:lt, framevisible=false, labelsize=18,)
     
         xlims!(ax, 0, 70.5)
         ylims!(ax, 0, 9)
@@ -113,11 +114,12 @@ function main_tau_grid_sensitivity()
         xticks_l = ([0, 20, 200], [L"0", L"20", L"200"])
         yticks_l = ([0, 20, 40], [L"0", L"20", L"40"])
 
-        fig = Figure(size=(400, 250), figure_padding=3)
+        fig = Figure(size=(500, 300), figure_padding=3)
 
-        ax = Axis(fig[1, 1], xlabel=L"H/Δx", ylabel=L"\mathrm{Relative\ error}\;[\%]", xticks=xticks_l,
+        ax = Axis(fig[1, 1], xlabel=L"H/Δx\;[-]", ylabel=L"\mathrm{Relative\ error}\;[\%]", xticks=xticks_l,
                     yticks=yticks_l, xscale=log10, xgridvisible=true, ygridvisible=true,
-                    topspinevisible=true, rightspinevisible=true)
+                    topspinevisible=true, rightspinevisible=true, xlabelsize=18, ylabelsize=18,
+                    xticklabelsize=16, yticklabelsize=16,)
         
         scatterlines!(ax, resolution, error; marker=:circle, color=:black)
 

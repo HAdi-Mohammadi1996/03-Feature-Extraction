@@ -119,7 +119,7 @@ function main_benchmark()
 
         ε = %$(round(error_A, digits=2))\%
         """;
-        halign=:center, tellwidth=false, tellheight=false, fontsize=16)
+        halign=:center, tellwidth=false, tellheight=false, fontsize=20)
         ax = Axis3(fig[2,1], aspect=:data, width=Relative(1.0), height=Relative(1.0), xlabel="", ylabel="", zlabel="",
                     xticks=ticks_l, yticks=ticks_l, zticks=ticks_l)
 
@@ -147,16 +147,17 @@ function sphere_grid_resolution()
         push!(error_A_nosmooth, 100 * (ssa_calculated_nosmooth - ssa_analytical) / ssa_analytical)
         push!(error_A_smooth, 100 * (ssa_calculated_withsmooth - ssa_analytical) / ssa_analytical)
     end
-        fig = Figure(size=(500, 250), figure_padding=3)
+        fig = Figure(size=(500, 300), figure_padding=3)
         ticks_x = ([0, 50, 100, 150], [L"0", L"50", L"100", L"150"])
         ticks_y = ([-1, 0, 1, 2, 3], [L"-1", L"0", L"1", L"2", L"3"])
         ax = Axis(fig[1, 1], xlabel=L"\text{Grid Resolution}", ylabel=L"\text{Relative error }[\%]",
-                    xticks=ticks_x, yticks=ticks_y,topspinevisible=true,rightspinevisible=true,
-                    bottomspinevisible=true, leftspinevisible=true)
+                    xticks=ticks_x, yticks=ticks_y,topspinevisible=true, rightspinevisible=true,
+                    bottomspinevisible=true, leftspinevisible=true, xlabelsize=18, ylabelsize=18,
+                    xticklabelsize=16, yticklabelsize=16,)
         hlines!(ax, [0], linestyle=:dash, color=:black)
         scatterlines!(ax, resolution, error_A_nosmooth; linewidth=2, label=L"σ=0.0", color=:black, marker=:circle)
         scatterlines!(ax, resolution, error_A_smooth; linewidth=2, label=L"σ=1.0", color=:black, marker=:rect)
-        axislegend(ax; orientation=:horizontal, position=:cb, framevisible=false)
+        axislegend(ax; orientation=:horizontal, position=:cb, framevisible=false, labelsize=20,)
         save("test/results/ssa/sphere_grid_resolution.svg", fig; backend=CairoMakie)
 
 end
@@ -175,16 +176,17 @@ function cube_grid_resolution()
         push!(error_A_nosmooth, 100 * (ssa_calculated_nosmooth - ssa_analytical) / ssa_analytical)
         push!(error_A_smooth, 100 * (ssa_calculated_withsmooth - ssa_analytical) / ssa_analytical)
     end
-        fig = Figure(size=(500, 250), figure_padding=3)
+        fig = Figure(size=(500, 300), figure_padding=3)
         ticks_x = ([0, 50, 100, 150], [L"0", L"50", L"100", L"150"])
         ticks_y = ([-15, -10, -5, 0], [L"-15", L"-10", L"-5", L"0"])
         ax = Axis(fig[1, 1], xlabel=L"\text{Grid Resolution}", ylabel=L"\text{Relative error }[\%]",
                     xticks=ticks_x, yticks=ticks_y, topspinevisible=true,rightspinevisible=true,
-                    bottomspinevisible=true, leftspinevisible=true)
+                    bottomspinevisible=true, leftspinevisible=true, xlabelsize=18, ylabelsize=18,
+                    xticklabelsize=16, yticklabelsize=16,)
         hlines!(ax, [0], linestyle=:dash, color=:black)
         scatterlines!(ax, resolution, error_A_nosmooth; linewidth=2, label=L"σ=0.0", color=:black, marker=:circle)
         scatterlines!(ax, resolution, error_A_smooth; linewidth=2, label=L"σ=1.0", color=:black, marker=:rect)
-        axislegend(ax; orientation=:horizontal, position=:cb, framevisible=false)
+        axislegend(ax; orientation=:horizontal, position=:cb, framevisible=false, labelsize=20,)
         save("test/results/ssa/cube_grid_resolution.svg", fig; backend=CairoMakie)
 
 end
