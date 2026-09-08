@@ -6,8 +6,8 @@ config = TOML.parsefile(joinpath(@__DIR__, "config.toml"))
 const SAMPLE_ID = config["SAMPLE_ID"]
 const MAT_KEY = config["MAT_KEY"]
 
-const INPUT_FILE = joinpath(@__DIR__, SAMPLE_ID)
-const OUTPUT_DIR = joinpath(@__DIR__, "output", "$SAMPLE_ID.csv")
+const INPUT_FILE = joinpath(config["DATA_DIR"], SAMPLE_ID, "mat")
+const OUTPUT_DIR = joinpath(config["DATA_DIR"], SAMPLE_ID, "features", "$SAMPLE_ID.csv")
 const AMGX_DLL = config["AMGX_DLL"]
 
 const DIRECTION = config["DIRECTION"]
