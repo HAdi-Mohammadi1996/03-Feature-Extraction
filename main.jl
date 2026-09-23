@@ -5,6 +5,9 @@ config = TOML.parsefile(joinpath(@__DIR__, "config.toml"))
 
 const SAMPLE_ID = config["SAMPLE_ID"]
 const MAT_KEY = config["MAT_KEY"]
+const STATIC_PHASE = config["STATIC_PHASE"]
+static_properties = nothing
+static_mask = nothing
 
 const INPUT_FILE = joinpath(config["DATA_DIR"], SAMPLE_ID, "mat")
 const OUTPUT_DIR = joinpath(config["DATA_DIR"], SAMPLE_ID, "features", "$SAMPLE_ID.csv")
@@ -31,23 +34,34 @@ function main()
         for file in files 
             println("\n processing: ", basename(file))
             C = MA.load_microstructure(file; key=MAT_KEY)
-            vf1 = MA.volume_fraction(C, 1)
-            vf2 = MA.volume_fraction(C, 2)
-            vf3 = MA.volume_fraction(C, 3)
-        
-            ssa1 = MA.specific_surface_area(C, 1; spacing=SPACINGS, σ=SSA_SIGMA)
-            ssa2 = MA.specific_surface_area(C, 2; spacing=SPACINGS, σ=SSA_SIGMA)
-            ssa3 = MA.specific_surface_area(C, 3; spacing=SPACINGS, σ=SSA_SIGMA)
+
+            props = Vector{Any}(undef, 3)
+
+            for p in 1:3
+                if p == STATIC_PHASE && !isnothing(static_properties)
+                    @assert (C .== p) == static_mask
+
+                    props[p] = static_properties
+                    continue
+                end
+
+                props[p] = (
+                    vf = MA.volume_fraction(C, p),
+                    ssa = MA.specific_surface_area(C, p; spacing=SPACINGS, σ=SSA_SIGMA),
+                    tau = MA.physical_tortuosity(C, p; direction=DIRECTION, spacings=SPACINGS, manage_amgx=false)
+                )
+
+                if p == STATIC_PHASE
+                    static_properties = props[p]
+                    static_mask = C .== p
+                end
+            end
 
             tpb = MA.total_tpb_density(C; spacing=SPACINGS)
 
-            # Assuming isotropic samples, therefore, only one direction is used for tau
-            tau1 = MA.physical_tortuosity(C, 1; direction=DIRECTION, spacings=SPACINGS, manage_amgx=false)
-            tau2 = MA.physical_tortuosity(C, 2; direction=DIRECTION, spacings=SPACINGS, manage_amgx=false)
-            tau3 = MA.physical_tortuosity(C, 3; direction=DIRECTION, spacings=SPACINGS, manage_amgx=false)
-
-            push!(rows, (file=basename(file), vf1=vf1, vf2=vf2, vf3=vf3,
-                         ssa1=ssa1, ssa2=ssa2, ssa3=ssa3, tau1=tau1, tau2=tau2, tau3=tau3, tpb=tpb))
+            push!(rows, (file=basename(file), vf1=props[1].vf, vf2=props[2].vf, vf3=props[3].vf,
+                         ssa1=props[1].ssa, ssa2=props[2].ssa, ssa3=props[3].ssa,
+                         tau1=props[1].tau, tau2=props[2].tau, tau3=props[3].tau, tpb=tpb))
         end
         
         mkpath(dirname(OUTPUT_DIR))
